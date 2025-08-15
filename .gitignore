@@ -12,9 +12,6 @@ embedding_model_prepare.py
 # ==========================================
 
 # Model and embedding directories (created by prepare script)
-images/
-embeddings/
-onnx/
 models/
 
 # Cache and temporary files

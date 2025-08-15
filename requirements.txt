@@ -1,29 +1,15 @@
 # Shopping Fullscreen - Python Dependencies
 # For Python 3.10+ virtual environment
 
-# Core GUI Framework
 PyQt5>=5.15.7
-
-# GStreamer Python Bindings (for video playback)
 PyGObject>=3.42.0
-
-# Image Processing
 Pillow>=9.2.0
 numpy>=1.21.0
-
-# Machine Learning Models
 torch>=1.12.0
-transformers>=4.21.0
-onnxruntime>=1.12.0
-
-# FashionCLIP for fashion similarity matching
 fashion-clip>=1.0.0
-
-# Optional: Performance optimization for quantized models
-# bitsandbytes>=0.35.0
+transformers
+optimum[onnxruntime]
+synap-python @ https://github.com/synaptics-synap/synap-python/releases/download/v0.0.4-preview/synap_python-0.0.4-cp310-cp310-manylinux_2_35_aarch64.whl
 
 # System Requirements Notes:
-# - GStreamer 1.16+ must be installed at system level
-# - For Wayland support: gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad
-# - For hardware acceleration: gstreamer1.0-vaapi (Intel) or gstreamer1.0-plugins-ugly (NVIDIA)
-# - YOLO models: Synap framework (target device specific)
+# - Astra SLSDK 1.7.0 OOBE 
