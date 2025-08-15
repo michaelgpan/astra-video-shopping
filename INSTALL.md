@@ -22,18 +22,6 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### Prepare Models and Images (One-time Setup)
-```bash
-# Activate virtual environment
-source venv/bin/activate
-
-# Download and prepare FashionCLIP models and images (takes 10-15 minutes)
-python embedding_model_prepare.py
-
-# Check preparation status
-python embedding_model_prepare.py --help
-```
-
 ### Run Application
 ```bash
 # Activate virtual environment
