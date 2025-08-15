@@ -211,7 +211,7 @@ class ImageEmbedding:
         except Exception as e:
             logger.error(f"ImageEmbedding: Error saving embeddings: {e}")
     
-    def initialize_full_system(self):
+    def initialize_full_system(self, image_limit=1000):
         """Run full initialization: setup, load, save, model, embeddings"""
         if not self.should_initialize():
             logger.info("ImageEmbedding: Images directory exists, skipping initialization")
@@ -222,7 +222,8 @@ class ImageEmbedding:
             datasets_cache = self.setup_directories()
             
             # Step 2: Load images from DeepFashion
-            if not self.load_deepfashion_images(cache_dir=datasets_cache):
+            data_split = f"train[:{image_limit}]"
+            if not self.load_deepfashion_images(data_split=data_split, cache_dir=datasets_cache):
                 logger.error("ImageEmbedding: Failed to load images")
                 return False
             
@@ -353,9 +354,10 @@ class ImageEmbedding:
         try:
             image_paths = []
             if os.path.exists(self.images_dir):
-                for i in range(1000):  # We have 1000 images
-                    image_path = os.path.join(self.images_dir, f"img_{i:03d}.png")
-                    if os.path.exists(image_path):
+                # Dynamically find all image files instead of hardcoded 1000
+                for filename in sorted(os.listdir(self.images_dir)):
+                    if filename.lower().endswith(('.png', '.jpg', '.jpeg')) and filename.startswith('img_'):
+                        image_path = os.path.join(self.images_dir, filename)
                         image_paths.append(image_path)
             return image_paths
         except Exception as e:
