@@ -32,11 +32,7 @@ A high-performance video shopping application on Synaptics Astra with real-time 
 ```bash
 # Create virtual environment with Python 3.10+
 python3.10 -m venv venv
-
-# Activate virtual environment
 source venv/bin/activate  # Linux/Mac
-# or
-venv\Scripts\activate     # Windows
 ```
 
 ### 2. Install Python Dependencies
