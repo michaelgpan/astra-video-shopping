@@ -3,10 +3,10 @@
 
 PyQt5>=5.15.7
 PyGObject>=3.42.0
-Pillow>=9.2.0
-numpy>=1.21.0
-torch>=1.12.0
-fashion-clip>=1.0.0
+Pillow
+numpy
+torch
+fashion-clip
 transformers
 optimum[onnxruntime]
 synap-python @ https://github.com/synaptics-synap/synap-python/releases/download/v0.0.4-preview/synap_python-0.0.4-cp310-cp310-manylinux_2_35_aarch64.whl

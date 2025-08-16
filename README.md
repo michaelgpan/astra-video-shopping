@@ -46,6 +46,8 @@ pip install -r requirements.txt
 
 ### Running the Application
 ```bash
+export XDG_RUNTIME_DIR=/var/run/user/0
+export WAYLAND_DISPLAY=wayland-1
 python shopping_fullscreen.py [--video VIDEO_PATH]
 ```
 
