@@ -31,8 +31,8 @@ A high-performance video shopping application on Synaptics Astra with real-time 
 ### 1. Create Virtual Environment
 ```bash
 # Create virtual environment with Python 3.10+
-python3.10 -m venv venv
-source venv/bin/activate  # Linux/Mac
+./setup_shopping.sh
+source venv/bin/activate 
 ```
 
 ### 2. Install Python Dependencies
@@ -40,8 +40,9 @@ source venv/bin/activate  # Linux/Mac
 # Upgrade pip first
 pip install --upgrade pip
 
-# Install all required packages
-pip install -r requirements.txt
+# Install below packages manually in case of setup failure 
+pip install torch transformers pillow
+pip install https://github.com/synaptics-synap/synap-python/releases/download/v0.0.4-preview/synap_python-0.0.4-cp310-cp310-manylinux_2_35_aarch64.whl
 ```
 
 ### Running the Application
