@@ -75,15 +75,8 @@ python shopping_fullscreen.py [--video VIDEO_PATH]
 
 ## Technical Architecture
 
-### Performance Optimizations
-- **Wayland Direct Rendering**: Bypasses Qt for video display
-- **Memory-based Frame Capture**: No disk I/O during operation
-- **Pre-loaded Models**: FashionCLIP models loaded at startup
-- **Efficient Pipeline**: Minimal decode-transfer-render overhead
-
-
 ### Dependencies
-- **GStreamer**: Video decoding and display (`waylandsink`, `decodebin`)
+- **GStreamer**: Video decoding and display
 - **PyQt5**: User interface and image handling
 - **YOLO/Synap**: Object detection models
 - **FashionCLIP**: Fashion similarity matching
@@ -123,18 +116,6 @@ python shopping_fullscreen.py [--video VIDEO_PATH]
 - **PyQt5** with video capabilities
 - **ONNX Runtime** for FashionCLIP inference
 
-## Performance Notes
-
-### 4K 60FPS Optimization
-- Uses direct Wayland rendering for maximum performance
-- Avoids frame-by-frame Qt processing during playback
-- Minimal CPU overhead during video playback
-
-### First-Time Matching
-- FashionCLIP models pre-loaded at startup (~10-15 seconds)
-- First fashion match is as fast as subsequent matches
-- No model loading delays during video playback
-
 ### Memory Usage
 - Models: ~1GB (FashionCLIP + YOLO)
 - Embeddings: ~200MB (1000 fashion items)
@@ -163,12 +144,6 @@ python shopping_fullscreen.py 2>&1 | tee shopping.log
 - **TinyFocusWindow**: Keyboard input handling during fullscreen
 - **ObjectDetectionService**: YOLO detection integration
 - **ImageEmbedding**: FashionCLIP similarity matching
-
-### Key Design Decisions
-- **Safety First**: No seek operations to prevent kernel crashes
-- **Performance**: Direct Wayland rendering for 4K smoothness  
-- **User Experience**: Pre-loaded models for instant matching
-- **Modularity**: Separate services for detection and matching
 
 ---
 *Optimized for fashion retail and shopping experiences with real-time AI-powered recommendations.*
