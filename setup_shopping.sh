@@ -31,4 +31,4 @@ else
 fi
 
 
-print_message $GREEN "All setup for video shopping\n\nsource .venv/bin/activate\n python shopping_fullscreen.py"
+print_message $GREEN "All setup for video shopping\n\nsource .venv/bin/activate\npython shopping_fullscreen.py"

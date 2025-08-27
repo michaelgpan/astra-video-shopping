@@ -1,40 +1,22 @@
 #!/usr/bin/env python3
 """
 Object Detection Service for Video Player
-Implements frame capture and object detection functionality matching Kotlin implementation
 """
 
 import json
 import logging
-from dataclasses import dataclass
 from typing import List, Optional, Tuple
 import threading
 import time
+import cv2
+import numpy as np
+import os
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import QRect
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Data classes matching Kotlin implementation
-@dataclass
-class Clothes:
-    """Data class representing detected clothing item"""
-    class_index: int
-    height: int
-    label: str
-    width: int
-    x: int
-    y: int
-
-@dataclass
-class Person:
-    """Data class representing detected person with clothing predictions"""
-    clothe_prediction: List[Clothes]
-    height: int
-    width: int
-    x: int
-    y: int
 
 class ObjectDetectionService:
     """Object detection service with hardcoded coordinates for testing"""
@@ -57,7 +39,12 @@ class ObjectDetectionService:
             "width": int,
             "x": int,
             "y": int,
-            "label": str
+            "label": str,
+            "mask": {
+              "data": str,      # Base64 encoded mask data
+              "shape": tuple,   # Mask array shape (height, width)
+              "dtype": str      # Mask data type
+            } | null            # null if no mask available
           }, ...
         ]
         """
@@ -104,6 +91,27 @@ class ObjectDetectionService:
             detection_entries = []
             for item in getattr(result, 'items', []):
                 bb = item.bounding_box
+                
+                # Extract mask data if available
+                mask_data = None
+                if hasattr(item, 'mask') and item.mask is not None:
+                    try:
+                        # Convert mask to numpy array and encode as base64 for JSON serialization
+                        import base64
+                        mask_array = np.array(item.mask.data) if hasattr(item.mask, 'data') else None
+                        if mask_array is not None:
+                            # Encode mask as base64 string for JSON serialization
+                            mask_bytes = mask_array.tobytes()
+                            mask_b64 = base64.b64encode(mask_bytes).decode('utf-8')
+                            mask_data = {
+                                'data': mask_b64,
+                                'shape': mask_array.shape,
+                                'dtype': str(mask_array.dtype)
+                            }
+                            logger.info(f"ObjectDetectionService: Extracted mask for detection {len(detection_entries)}, shape: {mask_array.shape}")
+                    except Exception as e:
+                        logger.warning(f"ObjectDetectionService: Failed to extract mask: {e}")
+                
                 entry = {
                     'class_index': int(getattr(item, 'class_index', 0)),
                     'confidence': float(getattr(item, 'confidence', 0.0)),
@@ -111,7 +119,8 @@ class ObjectDetectionService:
                     'width': int(getattr(getattr(bb, 'size', None), 'x', 0) if getattr(bb, 'size', None) else 0),
                     'x': int(getattr(getattr(bb, 'origin', None), 'x', 0) if getattr(bb, 'origin', None) else 0),
                     'y': int(getattr(getattr(bb, 'origin', None), 'y', 0) if getattr(bb, 'origin', None) else 0),
-                    'label': f"class_{int(getattr(item, 'class_index', 0))}"
+                    'label': f"class_{int(getattr(item, 'class_index', 0))}",
+                    'mask': mask_data
                 }
                 detection_entries.append(entry)
             
@@ -146,73 +155,7 @@ class ObjectDetectionService:
         self.detection_thread = threading.Thread(target=detection_worker)
         self.detection_thread.start()
     
-    def find_objects(self) -> str:
-        """
-        Simulate object detection API call with hardcoded coordinates
-        Returns JSON string matching Kotlin implementation format
-        """
-        # Reset interrupted flag for new detection attempt
-        self.interrupted = False
-        logger.info("ObjectDetectionService: Finding objects (hardcoded for testing)")
-        
-        # Simulate processing time like real API
-        time.sleep(0.5)
-        
-        if self.interrupted:
-            logger.info("ObjectDetectionService: Detection interrupted")
-            return "[]"
-        
-        # Hardcoded detection results matching video content
-        # These coordinates represent detected clothing items in the video frame
-        # Adjusted for 640x480 video frame size
-        hardcoded_results = [
-            {
-                "clothe_prediction": [
-                    {
-                        "class_index": 1,
-                        "height": 220,
-                        "label": "yellow_top",
-                        "width": 300,  # Reduced from 360 to fit frame
-                        "x": 180,
-                        "y": 270
-                    },
-                    {
-                        "class_index": 2,
-                        "height": 400,  # Reduced from 540 to fit frame
-                        "label": "purple_dress",
-                        "width": 280,   # Reduced from 360 to fit frame
-                        "x": 200,       # Reduced from 540 to fit within frame
-                        "y": 50         # Adjusted to fit within frame height
-                    }
-                ],
-                "height": 400,
-                "width": 300,
-                "x": 150,
-                "y": 100
-            }
-        ]
-        
-        # Convert to JSON string
-        json_result = json.dumps(hardcoded_results)
-        logger.info(f"ObjectDetectionService: Returning {len(hardcoded_results)} person(s) with clothing predictions")
-        
-        return json_result
-    
-    def find_objects_async(self, callback):
-        """
-        Asynchronous object detection matching Kotlin's thread-based approach
-        """
-        def detection_worker():
-            try:
-                result = self.find_objects()
-                if not self.interrupted:
-                    callback(result)
-            except Exception as e:
-                logger.error(f"ObjectDetectionService: Error in async detection: {e}")
-                callback("[]")
-        
-        self.detection_thread = threading.Thread(target=detection_worker)
-        self.detection_thread.start()
+
     
     def interrupt(self):
         """Interrupt the object detection service"""
@@ -324,6 +267,12 @@ class CoordinateProcessor:
             coordinates = []
             
             for detection in detection_list:
+                # Filter to keep only person detections (class_index == 0)
+                class_index = detection.get('class_index', -1)
+                if class_index != 0:
+                    logger.info(f"Filtering out non-person detection: class {class_index} ({detection.get('label', 'unknown')})")
+                    continue
+                
                 # Direct mapping from YOLO detection results
                 x = detection.get('x', 0)
                 y = detection.get('y', 0)
@@ -336,10 +285,11 @@ class CoordinateProcessor:
                 
                 coordinates.append((x, y, width, height))
                 
-                logger.info(f"Processed coordinates for {detection.get('label', 'unknown')} "
-                          f"(class {detection.get('class_index', 0)}, confidence {detection.get('confidence', 0.0):.2f}): "
+                logger.info(f"✅ Processed person coordinates for {detection.get('label', 'unknown')} "
+                          f"(class {class_index}, confidence {detection.get('confidence', 0.0):.2f}): "
                           f"({x}, {y}, {width}, {height})")
             
+            logger.info(f"👤 Filtered to {len(coordinates)} person detections (class 0 only)")
             return coordinates
             
         except Exception as e:
@@ -347,29 +297,29 @@ class CoordinateProcessor:
             return []
     
     @staticmethod
-    def create_python_objects(json_result: str) -> List[Clothes]:
+    def filter_person_detections(json_result: str) -> List[dict]:
         """
-        Convert JSON result to Python Clothes objects (direct YOLO detections)
+        Filter JSON result to keep only person detections (class_index == 0)
+        Returns the filtered detection data as dictionaries
         """
         try:
             detection_list = json.loads(json_result)
-            detections = []
+            person_detections = []
             
             for detection_data in detection_list:
-                detection = Clothes(
-                    class_index=detection_data.get('class_index', 0),
-                    height=detection_data.get('height', 0),
-                    label=detection_data.get('label', ''),
-                    width=detection_data.get('width', 0),
-                    x=detection_data.get('x', 0),
-                    y=detection_data.get('y', 0)
-                )
-                detections.append(detection)
+                # Filter to keep only person detections (class_index == 0)
+                class_index = detection_data.get('class_index', -1)
+                if class_index != 0:
+                    logger.info(f"Filtering out non-person object: class {class_index} ({detection_data.get('label', 'unknown')})")
+                    continue
+                
+                person_detections.append(detection_data)
             
-            return detections
+            logger.info(f"👤 Filtered {len(person_detections)} person detections (class 0 only)")
+            return person_detections
             
         except Exception as e:
-            logger.error(f"CoordinateProcessor: Error creating Python objects: {e}")
+            logger.error(f"CoordinateProcessor: Error filtering person detections: {e}")
             return []
 
 class ImageCropper:
@@ -449,6 +399,7 @@ class DetectionCoordinator:
         self.frame_service = FrameCaptureService()
         self.detection_service = ObjectDetectionService()
         self.coordinate_processor = CoordinateProcessor()
+        self.mask_processor = MaskProcessor()
         self.detection_results = []
         self.load_thread = None
     
@@ -472,13 +423,13 @@ class DetectionCoordinator:
                     # Process coordinates
                     coordinates = self.coordinate_processor.process_detection_results(json_result)
                     
-                    # Create Python objects (direct YOLO detections)
-                    detections = self.coordinate_processor.create_python_objects(json_result)
+                    # Filter person detections from JSON result
+                    person_detections = self.coordinate_processor.filter_person_detections(json_result)
                     
                     # Store results in memory
                     self.detection_results = {
                         'coordinates': coordinates,
-                        'detections': detections,
+                        'person_detections': person_detections,
                         'json_result': json_result
                     }
                     
@@ -491,7 +442,7 @@ class DetectionCoordinator:
                 except Exception as e:
                     logger.error(f"DetectionCoordinator: Error in detection callback: {e}")
             
-            # Prefer YOLO detection on the saved frame if available; fallback to hardcoded detection
+            # Prefer YOLO detection on the saved frame if available; fallback to empty result
             image_path = self.frame_service.get_last_frame_path()
             if image_path:
                 logger.info(f"DetectionCoordinator: Starting YOLO detection on captured frame {image_path}")
@@ -499,8 +450,8 @@ class DetectionCoordinator:
                 model_path = "/usr/share/synap/models/object_detection/coco/model/yolov8s-640x384/model.synap"
                 self.detection_service.find_objects_from_image_async(image_path, model_path=model_path, callback=detection_callback)
             else:
-                logger.warning("DetectionCoordinator: No saved frame path available, using fallback detection")
-                self.detection_service.find_objects_async(detection_callback)
+                logger.warning("DetectionCoordinator: No saved frame path available, returning empty detection result")
+                detection_callback("[]")
         
         else:
             logger.error("DetectionCoordinator: Failed to capture frame")
@@ -515,3 +466,222 @@ class DetectionCoordinator:
         self.detection_results = []
         if self.detection_service:
             self.detection_service.interrupt()
+    
+    def generate_mask_for_person(self, person_index: int) -> str:
+        """
+        Generate person crop for a specific person detection (on-demand)
+        
+        Args:
+            person_index: Index of the person in detection results
+            
+        Returns:
+            str: Path to generated person crop image, or None if failed
+        """
+        try:
+            if not self.detection_results or 'json_result' not in self.detection_results:
+                logger.warning("DetectionCoordinator: No detection results available")
+                return None
+            
+            # Parse JSON results to get detection data
+            detection_list = json.loads(self.detection_results['json_result'])
+            
+            # Filter to person detections only (class_index == 0)
+            person_detections = [d for d in detection_list if d.get('class_index', -1) == 0]
+            
+            if person_index >= len(person_detections):
+                logger.warning(f"DetectionCoordinator: Person index {person_index} out of range (total: {len(person_detections)})")
+                return None
+            
+            # Get the specific person detection
+            person_detection = person_detections[person_index]
+            
+            # Get original image path
+            original_image_path = self.frame_service.get_last_frame_path()
+            if not original_image_path:
+                logger.error("DetectionCoordinator: No original image path available")
+                return None
+            
+            # Generate segmented person crop for this person
+            crop_path = self.mask_processor.generate_person_mask(
+                detection_data=person_detection,
+                original_image_path=original_image_path
+            )
+            
+            if crop_path:
+                logger.info(f"DetectionCoordinator: Generated segmented person crop for person {person_index} -> {crop_path}")
+            else:
+                logger.error(f"DetectionCoordinator: Failed to generate segmented person crop for person {person_index}")
+            
+            return crop_path
+            
+        except Exception as e:
+            logger.error(f"DetectionCoordinator: Error generating mask for person {person_index}: {e}")
+            return None
+    
+    def get_mask_cache_info(self):
+        """Get information about the mask processor cache"""
+        return self.mask_processor.get_cache_info()
+    
+    def clear_mask_cache(self):
+        """Clear the mask processor cache"""
+        self.mask_processor.clear_cache()
+        logger.info("DetectionCoordinator: Mask cache cleared")
+
+
+class MaskProcessor:
+    """Process detection masks for individual persons"""
+    
+    def __init__(self):
+        self.mask_cache = {}  # Cache for generated masks
+        self.colors = {
+            0: [255, 255, 255],  # White for person class
+        }
+    
+    def generate_person_mask(self, detection_data: dict, original_image_path: str, output_path: str = None) -> str:
+        """
+        Generate segmented person crop with white background for a single person detection
+        
+        Args:
+            detection_data: Single detection from YOLO result
+            original_image_path: Path to original captured frame
+            output_path: Optional output path for mask image
+            
+        Returns:
+            str: Path to generated segmented person crop image
+        """
+        try:
+            # Create cache key
+            cache_key = f"{detection_data.get('x', 0)}_{detection_data.get('y', 0)}_{detection_data.get('width', 0)}_{detection_data.get('height', 0)}"
+            
+            # Check cache first
+            if cache_key in self.mask_cache:
+                logger.info(f"MaskProcessor: Using cached segmented person crop for detection {cache_key}")
+                return self.mask_cache[cache_key]
+            
+            # Load original image
+            if not os.path.exists(original_image_path):
+                logger.error(f"MaskProcessor: Original image not found at {original_image_path}")
+                return None
+            
+            img = cv2.imread(original_image_path)
+            if img is None:
+                logger.error(f"MaskProcessor: Failed to load image {original_image_path}")
+                return None
+            
+            inp_h, inp_w, _ = img.shape
+            
+            # Extract detection coordinates
+            x = detection_data.get('x', 0)
+            y = detection_data.get('y', 0)
+            width = detection_data.get('width', 0)
+            height = detection_data.get('height', 0)
+            
+            # Calculate crop boundaries with padding
+            padding = 20  # Add some padding around the person
+            x1 = max(0, x - padding)
+            y1 = max(0, y - padding)
+            x2 = min(inp_w, x + width + padding)
+            y2 = min(inp_h, y + height + padding)
+            
+            if x2 > x1 and y2 > y1:
+                # Crop the person region from the original image
+                cropped_img = img[y1:y2, x1:x2]
+                
+                # Create a white background image with the same size as the cropped region
+                white_bg = np.ones((y2-y1, x2-x1, 3), dtype=np.uint8) * 255
+                
+                # Try to use real segmentation mask if available
+                mask = None
+                if 'mask' in detection_data and detection_data['mask'] is not None:
+                    try:
+                        # Decode mask from base64
+                        import base64
+                        mask_info = detection_data['mask']
+                        mask_b64 = mask_info['data']
+                        mask_shape = mask_info['shape']
+                        mask_dtype = mask_info['dtype']
+                        
+                        # Decode base64 to bytes, then to numpy array
+                        mask_bytes = base64.b64decode(mask_b64)
+                        mask_array = np.frombuffer(mask_bytes, dtype=np.dtype(mask_dtype)).reshape(mask_shape)
+                        
+                        # Resize mask to image size using PIL
+                        from PIL import Image
+                        mask_pil = Image.fromarray(mask_array.astype(np.float32))
+                        mask_resized = mask_pil.resize((inp_w, inp_h), Image.Resampling.NEAREST)
+                        mask_bool = np.array(mask_resized) > 0.5
+                        
+                        # Crop mask to the same region as the image
+                        cropped_mask = mask_bool[y1:y2, x1:x2]
+                        
+                        logger.info(f"MaskProcessor: Using real segmentation mask, shape: {mask_array.shape}")
+                        mask = cropped_mask
+                        
+                    except Exception as e:
+                        logger.warning(f"MaskProcessor: Failed to decode real mask, falling back to elliptical mask: {e}")
+                
+                # Fallback to elliptical mask if no real mask available
+                if mask is None:
+                    logger.info(f"MaskProcessor: No real mask available, using elliptical mask")
+                    mask = np.zeros((y2-y1, x2-x1), dtype=np.uint8)
+                    
+                    # Calculate the person region within the cropped area
+                    person_x1 = max(0, x - x1)  # Person start relative to crop
+                    person_y1 = max(0, y - y1)  # Person start relative to crop
+                    person_x2 = min(x2-x1, x + width - x1)  # Person end relative to crop
+                    person_y2 = min(y2-y1, y + height - y1)  # Person end relative to crop
+                    
+                    # Create a simple elliptical mask for the person region
+                    center_x = (person_x1 + person_x2) // 2
+                    center_y = (person_y1 + person_y2) // 2
+                    radius_x = (person_x2 - person_x1) // 2
+                    radius_y = (person_y2 - person_y1) // 2
+                    
+                    # Create coordinate grids
+                    y_coords, x_coords = np.ogrid[:y2-y1, :x2-x1]
+                    
+                    # Create elliptical mask
+                    mask = ((x_coords - center_x) ** 2 / radius_x ** 2 + 
+                           (y_coords - center_y) ** 2 / radius_y ** 2) <= 1.0
+                    mask = mask.astype(np.uint8)
+                
+                # Apply mask: keep person pixels where mask is 1, white background elsewhere
+                result_img = white_bg.copy()
+                result_img[mask == 1] = cropped_img[mask == 1]
+                
+                # Generate output path if not provided
+                if output_path is None:
+                    cache_dir = "cache"
+                    os.makedirs(cache_dir, exist_ok=True)
+                    output_path = os.path.join(cache_dir, f"person_segmented_{cache_key}.png")
+                
+                # Save the result
+                success = cv2.imwrite(output_path, result_img)
+                if success:
+                    logger.info(f"MaskProcessor: Generated segmented person crop at ({x}, {y}) size {width}x{height} -> {output_path}")
+                    logger.info(f"MaskProcessor: Segmented crop size: {result_img.shape[1]}x{result_img.shape[0]}")
+                    # Cache the result
+                    self.mask_cache[cache_key] = output_path
+                    return output_path
+                else:
+                    logger.error(f"MaskProcessor: Failed to save segmented person crop to {output_path}")
+                    return None
+            else:
+                logger.warning(f"MaskProcessor: Invalid detection coordinates ({x}, {y}, {width}, {height})")
+                return None
+                
+        except Exception as e:
+            logger.error(f"MaskProcessor: Error generating segmented person crop: {e}")
+            return None
+    
+    def clear_cache(self):
+        """Clear the mask cache"""
+        self.mask_cache.clear()
+        logger.info("MaskProcessor: Cache cleared")
+    
+    def get_cache_info(self):
+        """Get information about the current cache"""
+        return {
+            'cache_size': len(self.mask_cache),
+            'cached_keys': list(self.mask_cache.keys())
+        }

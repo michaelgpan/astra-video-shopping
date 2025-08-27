@@ -16,11 +16,31 @@ class ImageEmbedding:
     Handles setup, image loading, model selection and embedding generation
     """
     
-    def __init__(self, base_dir=None):
+    def __init__(self, base_dir=None, use_segmented=True):
         """Initialize ImageEmbedding system"""
         self.base_dir = base_dir or os.getcwd()
-        self.images_dir = os.path.join(self.base_dir, "images")
-        self.embeddings_dir = os.path.join(self.base_dir, "embeddings")
+        self.use_segmented = use_segmented
+        
+        # Use segmented images and embeddings for computation (now the primary and only option)
+        if os.path.exists(os.path.join(self.base_dir, "images_segment")):
+            self.images_dir = os.path.join(self.base_dir, "images_segment")
+            self.embeddings_dir = os.path.join(self.base_dir, "embeddings_segment")
+            logger.info("ImageEmbedding: Using segmented images and embeddings for computation")
+        else:
+            # Fallback to original directories (for backward compatibility)
+            self.images_dir = os.path.join(self.base_dir, "images")
+            self.embeddings_dir = os.path.join(self.base_dir, "embeddings")
+            logger.warning("ImageEmbedding: Segmented directories not found, falling back to original directories")
+            logger.warning("ImageEmbedding: Consider running segmentation preparation first")
+        
+        # Use original images for display (higher quality)
+        self.display_images_dir = os.path.join(self.base_dir, "images")
+        if os.path.exists(self.display_images_dir):
+            logger.info("ImageEmbedding: Using original images for display (higher quality)")
+        else:
+            logger.warning("ImageEmbedding: Original images directory not found, will use segmented images for display")
+            self.display_images_dir = self.images_dir
+            
         self.onnx_dir = os.path.join(self.base_dir, "onnx")
         
         # Model components
@@ -88,7 +108,12 @@ class ImageEmbedding:
             
             def save_one(idx_img):
                 idx, img = idx_img
-                img.save(os.path.join(self.images_dir, f"img_{idx:03d}.png"))
+                filepath = os.path.join(self.images_dir, f"image_{idx:05d}.png")
+                # Skip if file exists and has higher index (preserve custom images)
+                if os.path.exists(filepath) and idx >= 1970:
+                    logger.info(f"ImageEmbedding: Skipping existing custom image: image_{idx:05d}.png")
+                    return
+                img.save(filepath)
             
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 list(tqdm(
@@ -176,14 +201,36 @@ class ImageEmbedding:
         self.infer_fn = hf_infer
     
     def generate_embeddings(self):
-        """Generate embeddings for loaded images"""
-        if not self.images or not self.infer_fn:
-            logger.error("ImageEmbedding: No images or model loaded")
+        """Generate embeddings for ALL images on disk (existing + newly downloaded)"""
+        if not self.infer_fn:
+            logger.error("ImageEmbedding: Model not loaded")
             return None
         
         try:
-            logger.info("ImageEmbedding: Computing image embeddings...")
-            self.embeddings = self.infer_fn(self.images)
+            # Load ALL images from disk (existing custom + newly downloaded)
+            all_images = []
+            if os.path.exists(self.images_dir):
+                image_files = []
+                for filename in sorted(os.listdir(self.images_dir)):
+                    if filename.lower().endswith(('.png', '.jpg', '.jpeg')) and filename.startswith('img_'):
+                        image_files.append(os.path.join(self.images_dir, filename))
+                
+                logger.info(f"ImageEmbedding: Loading {len(image_files)} images from disk for embedding generation...")
+                
+                from PIL import Image
+                for img_path in image_files:
+                    try:
+                        img = Image.open(img_path).convert("RGB")
+                        all_images.append(img)
+                    except Exception as e:
+                        logger.warning(f"ImageEmbedding: Failed to load {img_path}: {e}")
+            
+            if not all_images:
+                logger.error("ImageEmbedding: No images found on disk")
+                return None
+            
+            logger.info(f"ImageEmbedding: Computing embeddings for {len(all_images)} total images...")
+            self.embeddings = self.infer_fn(all_images)
             
             # L2 normalize embeddings
             import numpy as np
@@ -211,9 +258,9 @@ class ImageEmbedding:
         except Exception as e:
             logger.error(f"ImageEmbedding: Error saving embeddings: {e}")
     
-    def initialize_full_system(self, image_limit=1000):
+    def initialize_full_system(self, image_limit=1000, force=False):
         """Run full initialization: setup, load, save, model, embeddings"""
-        if not self.should_initialize():
+        if not force and not self.should_initialize():
             logger.info("ImageEmbedding: Images directory exists, skipping initialization")
             return True
         
@@ -222,7 +269,9 @@ class ImageEmbedding:
             datasets_cache = self.setup_directories()
             
             # Step 2: Load images from DeepFashion
-            data_split = f"train[:{image_limit}]"
+            # Reduce by 30 to account for existing custom images (img_999 to img_970)
+            download_count = image_limit - 30
+            data_split = f"train[:{download_count}]"
             if not self.load_deepfashion_images(data_split=data_split, cache_dir=datasets_cache):
                 logger.error("ImageEmbedding: Failed to load images")
                 return False
@@ -334,11 +383,16 @@ class ImageEmbedding:
             # Prepare results
             results = []
             for i, (idx, similarity) in enumerate(zip(top_indices, top_similarities)):
+                # Use original images for display (higher quality)
+                # Both directories now use the same naming format: image_XXXXX.png
+                display_image_path = os.path.join(self.display_images_dir, f"image_{idx:05d}.png")
+                logger.info(f"ImageEmbedding: Using original image for display: image_{idx:05d}.png")
+                
                 result = {
                     'rank': i + 1,
                     'index': int(idx),
                     'similarity': float(similarity),
-                    'image_path': os.path.join(self.images_dir, f"img_{idx:03d}.png")
+                    'image_path': display_image_path
                 }
                 results.append(result)
             
@@ -350,14 +404,14 @@ class ImageEmbedding:
             return []
     
     def get_image_paths(self):
-        """Get list of all image paths in the database"""
+        """Get list of all image paths in the database (for display)"""
         try:
             image_paths = []
-            if os.path.exists(self.images_dir):
+            if os.path.exists(self.display_images_dir):
                 # Dynamically find all image files instead of hardcoded 1000
-                for filename in sorted(os.listdir(self.images_dir)):
-                    if filename.lower().endswith(('.png', '.jpg', '.jpeg')) and filename.startswith('img_'):
-                        image_path = os.path.join(self.images_dir, filename)
+                for filename in sorted(os.listdir(self.display_images_dir)):
+                    if filename.lower().endswith(('.png', '.jpg', '.jpeg')) and filename.startswith('image_'):
+                        image_path = os.path.join(self.display_images_dir, filename)
                         image_paths.append(image_path)
             return image_paths
         except Exception as e:

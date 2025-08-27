@@ -13,6 +13,7 @@ embedding_model_prepare.py
 
 # Model and embedding directories (created by prepare script)
 models/
+images_segment
 
 # Cache and temporary files
 cache/

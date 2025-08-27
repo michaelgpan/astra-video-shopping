@@ -17,6 +17,9 @@ import os
 from object_detection import DetectionCoordinator, ImageCropper
 from image_embedding import ImageEmbedding
 
+# import cv2  # Removed to avoid OpenGL dependency
+import numpy as np
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,  
@@ -36,10 +39,12 @@ class PopupWindow(QMainWindow):
         self.image_cropper = ImageCropper()  # Initialize ImageCropper for bounding box cropping
         self.last_detection_results = None
         
+
+        
         # Initialize FashionCLIP embedding system 
         # Note: Models and images should be prepared using embedding_model_prepare.py
         logger.info("Loading pre-prepared FashionCLIP embedding system...")
-        self.image_embedding = ImageEmbedding()
+        self.image_embedding = ImageEmbedding(use_segmented=True)
         
         # Verify that models and images are ready
         if self.image_embedding.should_initialize():
@@ -276,10 +281,8 @@ class PopupWindow(QMainWindow):
                 # Debug layout sizes when paused (when user is actually looking at it)
                 self.debug_layout_sizes()
                 
-                self.detection_coordinator.on_video_paused(
-                    self.video_frame, 
-                    callback=self.on_detection_complete
-                )
+                # Use model.synap for fast detection via DetectionCoordinator
+                self.detection_coordinator.on_video_paused(self.video_frame, callback=self.on_detection_complete)
             else:
                 # Reset detection when video resumes
                 self.detection_coordinator.reset()
@@ -292,11 +295,11 @@ class PopupWindow(QMainWindow):
     def on_detection_complete(self, results):
         """Handle detection completion - store results and show first bounding box"""
         coordinates = results.get('coordinates', [])
-        detections = results.get('detections', [])
+        person_detections = results.get('person_detections', [])
         
-        logger.info(f"PopupWindow: Detection completed with {len(coordinates)} objects detected")
+        logger.info(f"🎯 Detection completed with {len(coordinates)} person detections")
         
-        # Store detection results
+        # Store detection results (already filtered to persons only by CoordinateProcessor)
         self.detection_coordinates = coordinates
         self.current_focus_index = 0 if coordinates else -1
         self.is_in_detection_mode = len(coordinates) > 0
@@ -340,12 +343,12 @@ class PopupWindow(QMainWindow):
         else:
             logger.warning(f"PopupWindow: Not in detection mode. Coordinates: {len(coordinates)}, Detection mode: {self.is_in_detection_mode}")
         
-        # Log detailed detection results
+        # Log detailed detection results (persons only)
         for i, (x, y, width, height) in enumerate(coordinates):
-            logger.info(f"PopupWindow: Object {i + 1} at ({x}, {y}) size {width}x{height}")
+            logger.info(f"👤 Person {i + 1} at ({x}, {y}) size {width}x{height}")
         
-        for detection in detections:
-            logger.info(f"PopupWindow: Detected {detection.label} (class {detection.class_index}) at ({detection.x}, {detection.y})")
+        for detection in person_detections:
+            logger.info(f"👤 Detected person {detection.get('label', 'unknown')} (class {detection.get('class_index', -1)}) at ({detection.get('x', 0)}, {detection.get('y', 0)})")
         
         # Integrate FashionCLIP similarity search with object detection
         self.show_detection_at_index(0)
@@ -356,11 +359,39 @@ class PopupWindow(QMainWindow):
             logger.warning(f"Cannot show detection {index}: no coordinates available")
             return
         
-        x, y, width, height = self.detection_coordinates[index]
+        coord = self.detection_coordinates[index]
+        x, y, width, height = coord  # coord is now a tuple (x, y, width, height)
         logger.info(f"Showing detection {index + 1}: ({x}, {y}, {width}, {height})")
         
-        # Crop the detected region from current frame
-        logger.info(f"Attempting to crop detection region for index {index}")
+        # Step 2: Generate segmented person crop for the highlighted person (on-demand)
+        logger.info(f"🎯 Generating segmented person crop for highlighted person {index + 1}")
+        crop_path = self.detection_coordinator.generate_mask_for_person(index)
+        
+        if crop_path:
+            logger.info(f"✅ Successfully generated segmented person crop for person {index + 1} -> {crop_path}")
+            
+            # Load the segmented person crop as QPixmap
+            from PyQt5.QtGui import QPixmap
+            crop_pixmap = QPixmap(crop_path)
+            
+            if not crop_pixmap.isNull():
+                logger.info(f"🎯 Successfully loaded segmented person crop for person {index + 1}, starting FashionCLIP search...")
+                # Find similar fashion items using FashionCLIP with segmented person crop
+                self.find_similar_fashion_items(crop_pixmap, index)
+            else:
+                logger.error(f"❌ Failed to load segmented person crop for person {index + 1}")
+                # Fallback to old cropping method
+                self._fallback_to_cropping(index, x, y, width, height)
+        else:
+            logger.warning(f"⚠️ Failed to generate segmented person crop for person {index + 1}, falling back to cropping method")
+            # Fallback to old cropping method
+            self._fallback_to_cropping(index, x, y, width, height)
+    
+    def _fallback_to_cropping(self, index, x, y, width, height):
+        """Fallback method using old cropping approach"""
+        logger.info(f"🔄 Using fallback cropping for detection {index + 1}")
+        
+        # Fallback to old cropping method
         cropped_image = self.crop_detection_region(x, y, width, height)
         if cropped_image is not None:
             logger.info(f"Successfully cropped image for detection {index + 1}, starting FashionCLIP search...")
@@ -370,7 +401,7 @@ class PopupWindow(QMainWindow):
             logger.error(f"Failed to crop image for detection {index + 1} - cropped_image is None")
     
     def crop_detection_region(self, x, y, width, height):
-        """Crop the detection region from the current video frame"""
+        """Crop the detection region from the current video frame and apply person segmentation"""
         try:
             logger.info(f"crop_detection_region: Starting crop for region ({x}, {y}, {width}, {height})")
             
@@ -394,15 +425,24 @@ class PopupWindow(QMainWindow):
             
             logger.info(f"crop_detection_region: Got frame: {current_frame.width()}x{current_frame.height()}")
             
-            # Use ImageCropper to crop the bounding box region
+            # Step 1: Use ImageCropper to crop the bounding box region (existing implementation)
             cropped_pixmap = self.image_cropper.crop_bounding_box(current_frame, x, y, width, height)
             
-            if cropped_pixmap is not None and not cropped_pixmap.isNull():
-                logger.info(f"crop_detection_region: Successfully cropped region: ({x}, {y}, {width}, {height})")
-                return cropped_pixmap
-            else:
+            if cropped_pixmap is None or cropped_pixmap.isNull():
                 logger.error(f"crop_detection_region: Failed to crop region - cropped_pixmap is None or null")
                 return None
+            
+            logger.info(f"crop_detection_region: Successfully cropped region: ({x}, {y}, {width}, {height})")
+            
+            # Step 2: Apply person segmentation (new logic)
+            segmented_pixmap = self.apply_person_segmentation(cropped_pixmap)
+            
+            if segmented_pixmap is not None:
+                logger.info("crop_detection_region: Successfully applied person segmentation")
+                return segmented_pixmap
+            else:
+                logger.warning("crop_detection_region: Segmentation failed, returning original crop")
+                return cropped_pixmap
                 
         except Exception as e:
             logger.error(f"crop_detection_region: Error cropping detection region: {e}")
@@ -410,53 +450,123 @@ class PopupWindow(QMainWindow):
             logger.error(f"crop_detection_region: Traceback: {traceback.format_exc()}")
             return None
     
-    def find_similar_fashion_items(self, cropped_image, detection_index):
-        """Find similar fashion items using FashionCLIP embeddings"""
+    def apply_person_segmentation(self, cropped_pixmap):
+        """Apply person segmentation to cropped image with white background"""
         try:
-            logger.info("Searching for similar fashion items...")
+            logger.info("apply_person_segmentation: Starting person segmentation...")
             
-            # Embeddings should already be pre-loaded during initialization
+            # Convert QPixmap to PIL Image
+            from PyQt5.QtCore import QBuffer, QIODevice
+            from PyQt5.QtGui import QImageWriter
+            from PIL import Image
+            import io
+            
+            # Save QPixmap to bytes
+            buffer = QBuffer()
+            buffer.open(QIODevice.WriteOnly)
+            cropped_pixmap.save(buffer, "PNG")
+            
+            # Convert to PIL Image
+            pil_image = Image.open(io.BytesIO(buffer.data())).convert("RGB")
+            buffer.close()
+            
+            # Apply segmentation
+            person_crops = segment_persons_from_image(pil_image, self.segmentation_model, min_confidence=0.5)
+            
+            if person_crops:
+                # Use the first (and likely only) segmented person crop
+                segmented_pil = person_crops[0]
+                logger.info(f"apply_person_segmentation: Successfully segmented person, found {len(person_crops)} person(s)")
+                
+                # Convert back to QPixmap
+                segmented_buffer = io.BytesIO()
+                segmented_pil.save(segmented_buffer, format='PNG')
+                segmented_buffer.seek(0)
+                
+                from PyQt5.QtGui import QPixmap
+                segmented_pixmap = QPixmap()
+                segmented_pixmap.loadFromData(segmented_buffer.getvalue())
+                
+                return segmented_pixmap
+            else:
+                logger.warning("apply_person_segmentation: No person detected in segmentation")
+                return None
+                
+        except Exception as e:
+            logger.error(f"apply_person_segmentation: Error applying segmentation: {e}")
+            import traceback
+            logger.error(f"apply_person_segmentation: Traceback: {traceback.format_exc()}")
+            return None
+    
+
+    
+    def find_similar_fashion_items(self, cropped_image, detection_index):
+        """Find similar fashion items using FashionCLIP embeddings (Steps 4 & 5)"""
+        try:
+            logger.info(f"🎯 Step 4: Starting similarity search for person {detection_index + 1}")
+            
+            # Step 4: Verify embeddings are available
             if not hasattr(self.image_embedding, 'embeddings') or self.image_embedding.embeddings is None:
-                logger.error("Embeddings not pre-loaded - this should not happen!")
-                logger.info("Attempting to load embeddings as fallback...")
+                logger.error("❌ Embeddings not pre-loaded - this should not happen!")
+                logger.info("🔄 Attempting to load embeddings as fallback...")
                 if not self.image_embedding.load_existing_embeddings():
-                    logger.error("Failed to load embeddings for similarity search")
+                    logger.error("❌ Failed to load embeddings for similarity search")
                     return
             
-            # Find top 12 similar images
+            logger.info(f"✅ Embeddings loaded successfully ({self.image_embedding.embeddings.shape[0]} items)")
+            
+            # Step 4: Generate embedding for the mask image
+            logger.info(f"🎯 Step 4: Computing embedding for person {detection_index + 1} mask image")
+            query_embedding = self.image_embedding.compute_image_embedding(cropped_image)
+            
+            if query_embedding is None:
+                logger.error("❌ Failed to compute embedding for mask image")
+                return
+            
+            logger.info(f"✅ Successfully computed embedding vector (shape: {query_embedding.shape})")
+            
+            # Step 4: Perform similarity search
+            logger.info(f"🎯 Step 4: Performing similarity search for person {detection_index + 1}")
             similar_items = self.image_embedding.find_similar_images(cropped_image, top_k=12)
             
             if similar_items:
-                logger.info(f"Found {len(similar_items)} similar fashion items:")
-                for item in similar_items:
-                    logger.info(f"  Rank {item['rank']}: {item['image_path']} (similarity: {item['similarity']:.3f})")
+                logger.info(f"✅ Step 4: Found {len(similar_items)} similar fashion items for person {detection_index + 1}")
+                for item in similar_items[:3]:  # Log top 3 for brevity
+                    logger.info(f"  🏆 Rank {item['rank']}: {os.path.basename(item['image_path'])} (similarity: {item['similarity']:.3f})")
+                if len(similar_items) > 3:
+                    logger.info(f"  ... and {len(similar_items) - 3} more items")
                 
-                # Display results in UI grid
+                # Step 5: Display results in UI grid
+                logger.info(f"🎯 Step 5: Displaying fashion matches for person {detection_index + 1}")
                 self.display_fashion_matches(similar_items, detection_index)
             else:
-                logger.warning("No similar fashion items found")
+                logger.warning(f"⚠️ Step 4: No similar fashion items found for person {detection_index + 1}")
                 
         except Exception as e:
-            logger.error(f"Error finding similar fashion items: {e}")
+            logger.error(f"❌ Error in similarity search for person {detection_index + 1}: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
     
     def display_fashion_matches(self, similar_items, detection_index):
-        """Display fashion matching results in UI grid (all 3 rows)"""
+        """Display fashion matching results in UI grid (Step 5)"""
         try:
-            logger.info("=== FASHION MATCHING RESULTS ===")
-            logger.info(f"Query: Detection {detection_index + 1}")
-            logger.info(f"Found {len(similar_items)} matches:")
+            logger.info(f"🎯 Step 5: Starting UI display for person {detection_index + 1}")
+            logger.info(f"📊 Query: Person Detection {detection_index + 1}")
+            logger.info(f"📊 Found {len(similar_items)} fashion matches")
             
-            # Clear previous images first
+            # Step 5: Clear previous results
+            logger.info(f"🧹 Step 5: Clearing previous fashion matches")
             for label in self.row1_labels + self.row2_labels + self.row3_labels:
                 label.clear()
                 label.setText("No Match")
                 label.setStyleSheet("color: #cccccc; font-size: 12px; border: 1px solid #ddd;")
             
-            # Display up to 12 matched images in the grid
+            # Step 5: Display matched images in UI grid
+            logger.info(f"🎨 Step 5: Displaying {min(len(similar_items), 12)} fashion matches in UI grid")
+            displayed_count = 0
+            
             for i, item in enumerate(similar_items[:12]):  # Limit to 12 images
-                logger.info(f"#{item['rank']}: {os.path.basename(item['image_path'])} "
+                logger.info(f"🎨 #{item['rank']}: {os.path.basename(item['image_path'])} "
                            f"(similarity: {item['similarity']:.3f})")
                 
                 # Load and display the matched image
@@ -466,32 +576,50 @@ class PopupWindow(QMainWindow):
                         # Scale image to fit the smaller label size
                         scaled_pixmap = pixmap.scaled(100, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                         
-                        # Update the appropriate label
+                        # Update the appropriate label with enhanced styling
                         if i < 4:
-                            # Row 1 (matches 1-4)
+                            # Row 1 (matches 1-4) - Top matches
                             self.row1_labels[i].setPixmap(scaled_pixmap)
                             self.row1_labels[i].setText("")  # Clear text
-                            self.row1_labels[i].setStyleSheet("border: 2px solid #4CAF50; border-radius: 5px;")
+                            self.row1_labels[i].setStyleSheet("border: 3px solid #4CAF50; border-radius: 8px; background-color: #f0f8f0;")
+                            logger.info(f"🎨 Row 1, Position {i+1}: Displayed match #{item['rank']}")
                         elif i < 8:
-                            # Row 2 (matches 5-8)
+                            # Row 2 (matches 5-8) - Good matches
                             self.row2_labels[i - 4].setPixmap(scaled_pixmap)
                             self.row2_labels[i - 4].setText("")  # Clear text
-                            self.row2_labels[i - 4].setStyleSheet("border: 2px solid #4CAF50; border-radius: 5px;")
+                            self.row2_labels[i - 4].setStyleSheet("border: 2px solid #2196F3; border-radius: 6px; background-color: #f0f8ff;")
+                            logger.info(f"🎨 Row 2, Position {i-3}: Displayed match #{item['rank']}")
                         else:
-                            # Row 3 (matches 9-12)
+                            # Row 3 (matches 9-12) - Additional matches
                             self.row3_labels[i - 8].setPixmap(scaled_pixmap)
                             self.row3_labels[i - 8].setText("")  # Clear text
-                            self.row3_labels[i - 8].setStyleSheet("border: 2px solid #4CAF50; border-radius: 5px;")
+                            self.row3_labels[i - 8].setStyleSheet("border: 2px solid #FF9800; border-radius: 6px; background-color: #fff8f0;")
+                            logger.info(f"🎨 Row 3, Position {i-7}: Displayed match #{item['rank']}")
+                        
+                        displayed_count += 1
                     else:
-                        logger.warning(f"Failed to load image: {item['image_path']}")
+                        logger.warning(f"❌ Failed to load image: {item['image_path']}")
                 else:
-                    logger.warning(f"Image file not found: {item['image_path']}")
+                    logger.warning(f"❌ Image file not found: {item['image_path']}")
             
-            logger.info("=== END RESULTS ===")
-            logger.info(f"Displayed {min(len(similar_items), 12)} fashion matches in UI grid")
+            # Step 5: Summary and completion
+            logger.info(f"✅ Step 5: Successfully displayed {displayed_count} fashion matches for person {detection_index + 1}")
+            logger.info(f"🎯 Step 5: UI grid updated with fashion similarity results")
+            
+            # Add summary information
+            if similar_items:
+                top_similarity = similar_items[0]['similarity']
+                avg_similarity = sum(item['similarity'] for item in similar_items[:displayed_count]) / displayed_count
+                logger.info(f"📊 Step 5: Top similarity: {top_similarity:.3f}, Average similarity: {avg_similarity:.3f}")
+            
+            logger.info(f"🎉 Steps 4 & 5 completed successfully for person {detection_index + 1}")
+            
+            # Log mask cache information
+            cache_info = self.detection_coordinator.get_mask_cache_info()
+            logger.info(f"📦 Mask cache status: {cache_info['cache_size']} items cached")
             
         except Exception as e:
-            logger.error(f"Error displaying fashion matches: {e}")
+            logger.error(f"❌ Error displaying fashion matches for person {detection_index + 1}: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
     
@@ -552,11 +680,11 @@ class PopupWindow(QMainWindow):
         
         # Draw bounding box
         painter = QPainter(frame_with_box)
-        pen = QPen(Qt.white, 5)  # White stroke, 5px width (matching Kotlin)
+        pen = QPen(Qt.red, 5)  # Red stroke, 5px width for better visibility
         painter.setPen(pen)
         painter.drawRect(x, y, width, height)
         painter.end()
-        logger.info(f"draw_single_bounding_box: Drew white rectangle at ({x}, {y}) size {width}x{height}")
+        logger.info(f"draw_single_bounding_box: Drew red rectangle at ({x}, {y}) size {width}x{height}")
         
         # Update video frame display
         video_label = self.get_video_label()
@@ -1146,8 +1274,34 @@ def simple_keyboard_monitor(player):
 def main():
     """Main function to run the video player with PyQt5 pop-up window"""
     
-    # Set up video path
-    video_path = "samples/clip.mp4"
+    # Parse command line arguments
+    import argparse
+    import os
+    
+    parser = argparse.ArgumentParser(description='Shopping Demo with Qt-embedded Video Player')
+    parser.add_argument('--video', '-v', 
+                       default='samples/clip.mp4',
+                       help='Path to video file relative to current directory (default: samples/clip.mp4)')
+    
+    args = parser.parse_args()
+    
+    # Set up video path (relative to current directory where shopping.py is located)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    video_path = os.path.join(script_dir, args.video)
+    
+    # Check if video file exists
+    if not os.path.exists(video_path):
+        logger.error(f"Video file not found: {video_path}")
+        logger.error(f"Please check the path relative to: {script_dir}")
+        logger.error("Available video files in samples/:")
+        samples_dir = os.path.join(script_dir, "samples")
+        if os.path.exists(samples_dir):
+            for f in os.listdir(samples_dir):
+                if f.lower().endswith(('.mp4', '.avi', '.mov', '.mkv')):
+                    logger.error(f"  - samples/{f}")
+        return 1
+    
+    logger.info(f"Using video file: {video_path}")
     
     try:
         # macOS GUI context setup
@@ -1215,4 +1369,7 @@ def main():
 
 
 if __name__ == "__main__":
+    logger.info("🛍️ Starting Shopping Demo with Qt-embedded video...")
+    logger.info("📝 Usage: python shopping.py [--video path/to/video.mp4]")
+    logger.info("📝 Example: python shopping.py --video samples/clip_1.mp4")
     sys.exit(main())

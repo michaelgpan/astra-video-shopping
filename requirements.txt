@@ -1,15 +1,20 @@
 # Shopping Fullscreen - Python Dependencies
 # For Python 3.10+ virtual environment
 
-PyQt5>=5.15.7
-PyGObject>=3.42.0
-Pillow
+#PyQt5>=5.15.7
+pygobject
+pillow
 numpy
 torch
 fashion-clip
 transformers
 optimum[onnxruntime]
-synap-python @ https://github.com/synaptics-synap/synap-python/releases/download/v0.0.4-preview/synap_python-0.0.4-cp310-cp310-manylinux_2_35_aarch64.whl
+ultralytics
+opencv-python
+scikit-learn
+datasets
+tqdm
+#synap-python @ https://github.com/synaptics-synap/synap-python/releases/download/v0.0.4-preview/synap_python-0.0.4-cp310-cp310-manylinux_2_35_aarch64.whl
 
 # System Requirements Notes:
 # - Astra SLSDK 1.7.0 OOBE 

@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 class TestWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.current_image_index = 0  # Start with img_000.png
-        self.images_dir = "images"
+        self.current_image_index = 0  # Start with first segmented image
+        self.images_dir = "images_segment"  # Use segmented images
         self.image_embedding = None
         
         # Initialize UI
@@ -34,8 +34,8 @@ class TestWindow(QMainWindow):
         
     def init_ui(self):
         """Initialize the user interface"""
-        self.setWindowTitle("Fashion Similarity Test")
-        self.setGeometry(100, 100, 1200, 800)
+        self.setWindowTitle("Fashion Similarity Test - Segmented Images")
+        self.setGeometry(100, 100, 1600, 1100)
         
         # Create central widget and main layout
         central_widget = QWidget()
@@ -45,7 +45,7 @@ class TestWindow(QMainWindow):
         # Left panel for query image (similar to video panel)
         self.left_panel = QFrame()
         self.left_panel.setStyleSheet("border: 2px solid gray; background-color: white;")
-        self.left_panel.setFixedWidth(400)
+        self.left_panel.setFixedWidth(450)
         
         left_layout = QVBoxLayout(self.left_panel)
         
@@ -59,11 +59,11 @@ class TestWindow(QMainWindow):
         self.query_image_label = QLabel()
         self.query_image_label.setAlignment(Qt.AlignCenter)
         self.query_image_label.setStyleSheet("border: 1px solid lightgray; background-color: white;")
-        self.query_image_label.setMinimumSize(350, 350)
+        self.query_image_label.setMinimumSize(400, 400)
         left_layout.addWidget(self.query_image_label)
         
         # Instructions
-        instructions = QLabel("Press → to go to next image (+10)\nPress ← to go to previous image (-10)")
+        instructions = QLabel("Press → to go to next image (+1)\nPress ← to go to previous image (-1)\nPress Shift+→ for +10, Shift+← for -10")
         instructions.setAlignment(Qt.AlignCenter)
         instructions.setStyleSheet("margin: 10px; color: gray;")
         left_layout.addWidget(instructions)
@@ -77,20 +77,21 @@ class TestWindow(QMainWindow):
         # Similar images title
         self.similar_label = QLabel("Top 12 Similar Images")
         self.similar_label.setAlignment(Qt.AlignCenter)
-        self.similar_label.setStyleSheet("font-size: 16px; font-weight: bold; margin: 10px;")
+        self.similar_label.setStyleSheet("font-size: 14px; font-weight: bold; margin: 5px;")
         right_layout.addWidget(self.similar_label)
         
-        # Grid for similar images (3x4 grid)
+        # Grid for similar images (4x3 grid)
         self.similar_grid = QGridLayout()
+        self.similar_grid.setSpacing(5)  # Reduce spacing between images
         self.similar_image_labels = []
         
-        for row in range(4):
-            for col in range(3):
+        for row in range(3):
+            for col in range(4):
                 label = QLabel()
                 label.setAlignment(Qt.AlignCenter)
                 label.setStyleSheet("border: 1px solid lightgray; background-color: white;")
-                label.setFixedSize(150, 150)
-                label.setScaledContents(True)
+                label.setFixedSize(250, 330)
+                label.setScaledContents(False)
                 self.similar_image_labels.append(label)
                 self.similar_grid.addWidget(label, row, col)
         
@@ -106,34 +107,83 @@ class TestWindow(QMainWindow):
         logger.info("Test UI initialized successfully")
         
     def init_image_embedding(self):
-        """Initialize the image embedding system"""
+        """Initialize the image embedding system with segmented data"""
         try:
-            logger.info("Initializing ImageEmbedding system...")
-            self.image_embedding = ImageEmbedding()
-            logger.info("ImageEmbedding system initialized successfully")
+            logger.info("Initializing ImageEmbedding system with segmented images...")
+            self.image_embedding = ImageEmbedding(use_segmented=True)
+            
+            # Load pre-computed segmented embeddings
+            if not self.image_embedding.load_existing_embeddings():
+                logger.error("Failed to load segmented embeddings!")
+                logger.error("Make sure images_segment/ and embeddings_segment/ directories exist")
+                return
+                
+            logger.info("✅ ImageEmbedding system with segmented data initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize ImageEmbedding: {e}")
+    
+    def find_next_available_image(self):
+        """Find the next available image file"""
+        try:
+            # Search forward for the next available image (max 50 attempts)
+            for i in range(50):
+                test_index = self.current_image_index + i
+                if test_index > 1999:  # Beyond max range
+                    break
+                    
+                test_filename = f"image_{test_index:05d}.png"
+                test_path = os.path.join(self.images_dir, test_filename)
+                
+                if os.path.exists(test_path):
+                    self.current_image_index = test_index
+                    logger.info(f"Found available image at index {test_index}")
+                    return True
+            
+            # If forward search failed, try backward search
+            for i in range(1, 50):
+                test_index = self.current_image_index - i
+                if test_index < 0:  # Before min range
+                    break
+                    
+                test_filename = f"image_{test_index:05d}.png"
+                test_path = os.path.join(self.images_dir, test_filename)
+                
+                if os.path.exists(test_path):
+                    self.current_image_index = test_index
+                    logger.info(f"Found available image at index {test_index}")
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error finding next available image: {e}")
+            return False
             
     def update_display(self):
         """Update both query image and similar images display"""
         try:
-            # Load and display query image
-            image_filename = f"img_{self.current_image_index:03d}.png"
+            # Load and display query image (segmented images use new short naming format)
+            image_filename = f"image_{self.current_image_index:05d}.png"
             image_path = os.path.join(self.images_dir, image_filename)
             
             if not os.path.exists(image_path):
-                logger.error(f"Image not found: {image_path}")
-                return
+                logger.warning(f"Image not found: {image_path}")
+                # Try to find the next available image
+                if self.find_next_available_image():
+                    return self.update_display()  # Recursive call with new index
+                else:
+                    logger.error("No available images found in the directory")
+                    return
                 
             # Display query image
             pixmap = QPixmap(image_path)
             if not pixmap.isNull():
                 # Scale image to fit label while maintaining aspect ratio
-                scaled_pixmap = pixmap.scaled(350, 350, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                scaled_pixmap = pixmap.scaled(400, 400, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 self.query_image_label.setPixmap(scaled_pixmap)
                 
                 # Update title
-                self.query_label.setText(f"Query Image: {image_filename}")
+                self.query_label.setText(f"Query Segmented Image: {image_filename}")
                 
                 logger.info(f"Loaded query image: {image_filename}")
                 
@@ -172,8 +222,8 @@ class TestWindow(QMainWindow):
                     if os.path.exists(image_path):
                         pixmap = QPixmap(image_path)
                         if not pixmap.isNull():
-                            # Scale to fit grid cell
-                            scaled_pixmap = pixmap.scaled(150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                            # Scale to fit grid cell (same as query image)
+                            scaled_pixmap = pixmap.scaled(200, 300, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                             self.similar_image_labels[i].setPixmap(scaled_pixmap)
                             
                             # Set tooltip with similarity score
@@ -200,15 +250,27 @@ class TestWindow(QMainWindow):
         """Handle keyboard input"""
         try:
             if event.key() == Qt.Key_Right:
-                # Go to next image (+10)
-                self.current_image_index = min(999, self.current_image_index + 10)
-                logger.info(f"Next image: img_{self.current_image_index:03d}.png")
+                # Check if Shift is pressed for larger jumps
+                if event.modifiers() & Qt.ShiftModifier:
+                    # Go to next image (+10)
+                    self.current_image_index = min(1999, self.current_image_index + 10)
+                    logger.info(f"Next image (+10): image_{self.current_image_index:05d}.png")
+                else:
+                    # Go to next image (+1)
+                    self.current_image_index = min(1999, self.current_image_index + 1)
+                    logger.info(f"Next image: image_{self.current_image_index:05d}.png")
                 self.update_display()
                 
             elif event.key() == Qt.Key_Left:
-                # Go to previous image (-10)
-                self.current_image_index = max(0, self.current_image_index - 10)
-                logger.info(f"Previous image: img_{self.current_image_index:03d}.png")
+                # Check if Shift is pressed for larger jumps
+                if event.modifiers() & Qt.ShiftModifier:
+                    # Go to previous image (-10)
+                    self.current_image_index = max(0, self.current_image_index - 10)
+                    logger.info(f"Previous image (-10): image_{self.current_image_index:05d}.png")
+                else:
+                    # Go to previous image (-1)
+                    self.current_image_index = max(0, self.current_image_index - 1)
+                    logger.info(f"Previous image: image_{self.current_image_index:05d}.png")
                 self.update_display()
                 
             elif event.key() == Qt.Key_Q:
@@ -232,7 +294,7 @@ def main():
         window = TestWindow()
         window.show()
         
-        logger.info("Application started. Controls: → next (+10), ← previous (-10), Q quit")
+        logger.info("Application started. Controls: → next (+1), ← previous (-1), Shift+→ (+10), Shift+← (-10), Q quit")
         
         # Start event loop
         sys.exit(app.exec_())

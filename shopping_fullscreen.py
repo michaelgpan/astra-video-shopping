@@ -601,11 +601,11 @@ class PopupWindow(QMainWindow):
         
         # Draw bounding box
         painter = QPainter(frame_with_box)
-        pen = QPen(Qt.white, 5)  # White stroke, 5px width (matching Kotlin)
+        pen = QPen(Qt.red, 5)  # Red stroke, 5px width for better visibility
         painter.setPen(pen)
         painter.drawRect(x, y, width, height)
         painter.end()
-        logger.info(f"draw_single_bounding_box: Drew white rectangle at ({x}, {y}) size {width}x{height}")
+        logger.info(f"draw_single_bounding_box: Drew red rectangle at ({x}, {y}) size {width}x{height}")
         
         # Update video frame display - NO SCALING to preserve coordinate accuracy
         video_label = self.get_video_label()
