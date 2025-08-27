@@ -129,14 +129,14 @@ class PopupWindow(QMainWindow):
         row1_layout.setContentsMargins(10, 10, 10, 10)  # Same margins as other rows
         row1_layout.setSpacing(10)  # Same spacing as other rows
         
-        # Row 1 image labels (for FashionCLIP matches 1-4)
+        # Row 1 image labels (for FashionCLIP matches 1-3)
         self.row1_labels = []
-        for i in range(4):
+        for i in range(3):
             label = QLabel(f"Match {i+1}")
             label.setStyleSheet("color: #cccccc; font-size: 12px; border: 1px solid #ddd;")
             label.setAlignment(Qt.AlignCenter)
-            label.setMinimumSize(120, 120)  # Same size as other rows
-            label.setMaximumSize(200, 200)  # Set maximum size to prevent expansion
+            label.setMinimumSize(150, 150)  # Increased size for better visibility
+            label.setMaximumSize(250, 250)  # Increased maximum size
             label.setScaledContents(True)  # Allow image scaling
             row1_layout.addWidget(label)
             self.row1_labels.append(label)
@@ -150,14 +150,14 @@ class PopupWindow(QMainWindow):
         row2_layout.setContentsMargins(10, 10, 10, 10)  # Same margins as row 1
         row2_layout.setSpacing(10)  # Same spacing as row 1
         
-        # Row 2 image labels (for FashionCLIP matches 5-8)
+        # Row 2 image labels (for FashionCLIP matches 4-6)
         self.row2_labels = []
-        for i in range(4):
-            label = QLabel(f"Match {i+5}")
+        for i in range(3):
+            label = QLabel(f"Match {i+4}")
             label.setStyleSheet("color: #cccccc; font-size: 12px; border: 1px solid #ddd;")
             label.setAlignment(Qt.AlignCenter)
-            label.setMinimumSize(120, 120)  # Same size as row 1
-            label.setMaximumSize(200, 200)  # Set maximum size to prevent expansion
+            label.setMinimumSize(150, 150)  # Increased size for better visibility
+            label.setMaximumSize(250, 250)  # Increased maximum size
             label.setScaledContents(True)  # Allow image scaling
             row2_layout.addWidget(label)
             self.row2_labels.append(label)  
@@ -171,14 +171,14 @@ class PopupWindow(QMainWindow):
         row3_layout.setContentsMargins(10, 10, 10, 10)  # Same margins as row 1
         row3_layout.setSpacing(10)  # Same spacing as row 1
         
-        # Row 3 image labels (for FashionCLIP matches 9-12)
+        # Row 3 image labels (for FashionCLIP matches 7-9)
         self.row3_labels = []
-        for i in range(4):
-            label = QLabel(f"Match {i+9}")
+        for i in range(3):
+            label = QLabel(f"Match {i+7}")
             label.setStyleSheet("color: #cccccc; font-size: 12px; border: 1px solid #ddd;")
             label.setAlignment(Qt.AlignCenter)
-            label.setMinimumSize(120, 120)  # Same size as row 1
-            label.setMaximumSize(200, 200)  # Set maximum size to prevent expansion
+            label.setMinimumSize(150, 150)  # Increased size for better visibility
+            label.setMaximumSize(250, 250)  # Increased maximum size
             label.setScaledContents(True)  # Allow image scaling
             row3_layout.addWidget(label)
             self.row3_labels.append(label)
@@ -562,10 +562,10 @@ class PopupWindow(QMainWindow):
                 label.setStyleSheet("color: #cccccc; font-size: 12px; border: 1px solid #ddd;")
             
             # Step 5: Display matched images in UI grid
-            logger.info(f"🎨 Step 5: Displaying {min(len(similar_items), 12)} fashion matches in UI grid")
+            logger.info(f"🎨 Step 5: Displaying {min(len(similar_items), 9)} fashion matches in UI grid")
             displayed_count = 0
             
-            for i, item in enumerate(similar_items[:12]):  # Limit to 12 images
+            for i, item in enumerate(similar_items[:9]):  # Limit to 9 images
                 logger.info(f"🎨 #{item['rank']}: {os.path.basename(item['image_path'])} "
                            f"(similarity: {item['similarity']:.3f})")
                 
@@ -573,28 +573,28 @@ class PopupWindow(QMainWindow):
                 if os.path.exists(item['image_path']):
                     pixmap = QPixmap(item['image_path'])
                     if not pixmap.isNull():
-                        # Scale image to fit the smaller label size
-                        scaled_pixmap = pixmap.scaled(100, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                        # Scale image to fit the larger label size
+                        scaled_pixmap = pixmap.scaled(150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                         
-                        # Update the appropriate label with enhanced styling
-                        if i < 4:
-                            # Row 1 (matches 1-4) - Top matches
+                        # Update the appropriate label with default styling
+                        if i < 3:
+                            # Row 1 (matches 1-3)
                             self.row1_labels[i].setPixmap(scaled_pixmap)
                             self.row1_labels[i].setText("")  # Clear text
-                            self.row1_labels[i].setStyleSheet("border: 3px solid #4CAF50; border-radius: 8px; background-color: #f0f8f0;")
+                            self.row1_labels[i].setStyleSheet("border: 2px solid #ddd; border-radius: 6px; background-color: #f9f9f9;")
                             logger.info(f"🎨 Row 1, Position {i+1}: Displayed match #{item['rank']}")
-                        elif i < 8:
-                            # Row 2 (matches 5-8) - Good matches
-                            self.row2_labels[i - 4].setPixmap(scaled_pixmap)
-                            self.row2_labels[i - 4].setText("")  # Clear text
-                            self.row2_labels[i - 4].setStyleSheet("border: 2px solid #2196F3; border-radius: 6px; background-color: #f0f8ff;")
-                            logger.info(f"🎨 Row 2, Position {i-3}: Displayed match #{item['rank']}")
+                        elif i < 6:
+                            # Row 2 (matches 4-6)
+                            self.row2_labels[i - 3].setPixmap(scaled_pixmap)
+                            self.row2_labels[i - 3].setText("")  # Clear text
+                            self.row2_labels[i - 3].setStyleSheet("border: 2px solid #ddd; border-radius: 6px; background-color: #f9f9f9;")
+                            logger.info(f"🎨 Row 2, Position {i-2}: Displayed match #{item['rank']}")
                         else:
-                            # Row 3 (matches 9-12) - Additional matches
-                            self.row3_labels[i - 8].setPixmap(scaled_pixmap)
-                            self.row3_labels[i - 8].setText("")  # Clear text
-                            self.row3_labels[i - 8].setStyleSheet("border: 2px solid #FF9800; border-radius: 6px; background-color: #fff8f0;")
-                            logger.info(f"🎨 Row 3, Position {i-7}: Displayed match #{item['rank']}")
+                            # Row 3 (matches 7-9)
+                            self.row3_labels[i - 6].setPixmap(scaled_pixmap)
+                            self.row3_labels[i - 6].setText("")  # Clear text
+                            self.row3_labels[i - 6].setStyleSheet("border: 2px solid #ddd; border-radius: 6px; background-color: #f9f9f9;")
+                            logger.info(f"🎨 Row 3, Position {i-5}: Displayed match #{item['rank']}")
                         
                         displayed_count += 1
                     else:
