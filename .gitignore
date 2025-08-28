@@ -92,6 +92,10 @@ shopping.log
 !samples/
 !samples/*
 
+# Allow images directory
+!images/
+!images/*
+
 # ==========================================
 # CONFIGURATION AND SECRETS
 # ==========================================
