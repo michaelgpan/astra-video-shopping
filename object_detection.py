@@ -135,6 +135,45 @@ class ObjectDetectionService:
         """Convenience wrapper to run detection on a static image and return JSON schema"""
         return self.yolo_od(image_path=image_path, model_path=model_path)
     
+    def yolo_od_raw(self, image_path: str, model_path: str = "model.synap"):
+        """
+        Run YOLO object detection using synap and return raw synap result objects
+        This method returns the original synap detection objects with masks intact
+        """
+        try:
+            # Lazy import to avoid hard dependency at module import time
+            from synap import Network
+            from synap.preprocessor import Preprocessor
+            from synap.postprocessor import Detector
+        except Exception as e:
+            logger.error(f"ObjectDetectionService: synap dependency not available: {e}")
+            return None
+        
+        import os
+        if not os.path.exists(model_path):
+            logger.error(f"ObjectDetectionService: Model not found at '{model_path}'")
+            return None
+        if not os.path.exists(image_path):
+            logger.error(f"ObjectDetectionService: Image not found at '{image_path}'")
+            return None
+        
+        try:
+            logger.info(f"ObjectDetectionService: Running YOLO (synap) raw on {image_path} with model {model_path}")
+            network = Network(model_path)
+            preprocessor = Preprocessor()
+            detector = Detector()
+            
+            assigned_rect = preprocessor.assign(network.inputs, image_path)
+            _ = network.predict()
+            result = detector.process(_, assigned_rect)
+            
+            logger.info(f"ObjectDetectionService: Raw YOLO returned {len(result.items)} detection(s)")
+            return result
+            
+        except Exception as e:
+            logger.error(f"ObjectDetectionService: Error running synap detection: {e}")
+            return None
+    
     def find_objects_from_image_async(self, image_path: str, model_path: str = "model.synap", callback=None):
         """Run YOLO detection asynchronously on the given image and invoke callback with JSON result"""
         # Reset interrupted flag for new detection attempt
@@ -401,6 +440,8 @@ class DetectionCoordinator:
         self.coordinate_processor = CoordinateProcessor()
         self.mask_processor = MaskProcessor()
         self.detection_results = []
+        self.raw_detection_results = None  # Store raw synap results for mask processing
+        self.segmented_full_image = None  # Store the full segmented image with white background
         self.load_thread = None
     
     def on_video_paused(self, video_widget, callback=None):
@@ -447,7 +488,19 @@ class DetectionCoordinator:
             if image_path:
                 logger.info(f"DetectionCoordinator: Starting YOLO detection on captured frame {image_path}")
                 # Use hardcoded model path for target machine
-                model_path = "/usr/share/synap/models/object_detection/coco/model/yolov8s-640x384/model.synap"
+                # model_path = "/usr/share/synap/models/object_detection/coco/model/yolov8s-640x384/model.synap"
+                model_path = "/usr/share/synap/models/object_detection/coco/model/yolov8s-seg-640x352/model_seg.synap"
+                
+                # First, get raw detection results for mask processing
+                raw_result = self.detection_service.yolo_od_raw(image_path, model_path=model_path)
+                if raw_result:
+                    self.raw_detection_results = raw_result
+                    logger.info(f"DetectionCoordinator: Stored raw detection results with {len(raw_result.items)} items")
+                    
+                    # Generate the full segmented image once for all persons
+                    self.generate_full_segmented_image(image_path, raw_result)
+                
+                # Then run async detection for JSON results
                 self.detection_service.find_objects_from_image_async(image_path, model_path=model_path, callback=detection_callback)
             else:
                 logger.warning("DetectionCoordinator: No saved frame path available, returning empty detection result")
@@ -464,20 +517,142 @@ class DetectionCoordinator:
         """Reset detection state"""
         self.frame_service.reset_capture_flag()
         self.detection_results = []
+        self.raw_detection_results = None  # Clear raw detection results
+        self.segmented_full_image = None  # Clear full segmented image
         if self.detection_service:
             self.detection_service.interrupt()
     
     def generate_mask_for_person(self, person_index: int) -> str:
         """
-        Generate person crop for a specific person detection (on-demand)
+        Generate person crop for a specific person detection using segmentation masks
         
         Args:
             person_index: Index of the person in detection results
             
         Returns:
-            str: Path to generated person crop image, or None if failed
+            str: Path to generated segmented person crop image, or None if failed
         """
         try:
+            # Get original image path
+            original_image_path = self.frame_service.get_last_frame_path()
+            if not original_image_path:
+                logger.error("DetectionCoordinator: No original image path available")
+                return None
+            
+            # Try to use the pre-generated full segmented image for efficiency
+            if self.segmented_full_image and os.path.exists(self.segmented_full_image):
+                logger.info(f"DetectionCoordinator: Using pre-generated full segmented image for person {person_index}")
+                
+                # Get person detection coordinates for cropping
+                if self.raw_detection_results and self.raw_detection_results.items:
+                    person_detections = [d for d in self.raw_detection_results.items if d.class_index == 0]
+                    
+                    if person_index >= len(person_detections):
+                        logger.warning(f"DetectionCoordinator: Person index {person_index} out of range (total: {len(person_detections)})")
+                        return None
+                    
+                    # Get bounding box coordinates
+                    detection = person_detections[person_index]
+                    bb = detection.bounding_box
+                    x = bb.origin.x
+                    y = bb.origin.y
+                    width = bb.size.x
+                    height = bb.size.y
+                    
+                    # Load the full segmented image
+                    import cv2
+                    full_segmented_img = cv2.imread(self.segmented_full_image)
+                    if full_segmented_img is None:
+                        logger.error(f"DetectionCoordinator: Failed to load full segmented image")
+                        return None
+                    
+                    # Crop the person region from the full segmented image
+                    padding = 20  # Add some padding around the person
+                    x1 = max(0, x - padding)
+                    y1 = max(0, y - padding)
+                    x2 = min(full_segmented_img.shape[1], x + width + padding)
+                    y2 = min(full_segmented_img.shape[0], y + height + padding)
+                    
+                    if x2 > x1 and y2 > y1:
+                        cropped_img = full_segmented_img[y1:y2, x1:x2]
+                        
+                        # Generate output path
+                        import os
+                        cache_dir = "cache"
+                        os.makedirs(cache_dir, exist_ok=True)
+                        cache_key = f"person_segmented_{person_index}"
+                        output_path = os.path.join(cache_dir, f"{cache_key}.png")
+                        
+                        # Save the cropped image
+                        success = cv2.imwrite(output_path, cropped_img)
+                        if success:
+                            logger.info(f"DetectionCoordinator: Generated person crop {person_index} from full segmented image -> {output_path}")
+                            return output_path
+                        else:
+                            logger.error(f"DetectionCoordinator: Failed to save cropped image to {output_path}")
+                    else:
+                        logger.warning(f"DetectionCoordinator: Invalid crop coordinates for person {person_index}")
+            
+            # Fallback to individual segmentation if full image not available
+            if self.raw_detection_results and self.raw_detection_results.items:
+                logger.info(f"DetectionCoordinator: Using individual segmentation for person {person_index}")
+                
+                # Filter to person detections only (class_index == 0)
+                person_detections = [d for d in self.raw_detection_results.items if d.class_index == 0]
+                
+                if person_index >= len(person_detections):
+                    logger.warning(f"DetectionCoordinator: Person index {person_index} out of range (total: {len(person_detections)})")
+                    return None
+                
+                # Use the new color_bg function for precise segmentation
+                try:
+                    # Load the original image
+                    import cv2
+                    img = cv2.imread(original_image_path)
+                    if img is None:
+                        logger.error(f"DetectionCoordinator: Failed to load image {original_image_path}")
+                        return None
+                    
+                    # Create a subset of detections with only the target person
+                    target_detection = person_detections[person_index]
+                    
+                    # Create a mock DetectorResultItems-like object with only the target detection
+                    class SingleDetectionWrapper:
+                        def __init__(self, detection):
+                            self.items = [detection]
+                    
+                    single_detection = SingleDetectionWrapper(target_detection)
+                    
+                    # Use the mask processor's color_bg function
+                    segmented_img = self.mask_processor.color_bg(
+                        img=img,
+                        detections=single_detection,
+                        bg_color=(255, 255, 255),  # White background
+                        mode="apply_fg"  # Create new image, don't modify original
+                    )
+                    
+                    # Generate output path
+                    import os
+                    cache_dir = "cache"
+                    os.makedirs(cache_dir, exist_ok=True)
+                    cache_key = f"person_segmented_{person_index}"
+                    output_path = os.path.join(cache_dir, f"{cache_key}.png")
+                    
+                    # Save the segmented image
+                    success = cv2.imwrite(output_path, segmented_img)
+                    if success:
+                        logger.info(f"DetectionCoordinator: Generated segmented person crop for person {person_index} using raw masks -> {output_path}")
+                        return output_path
+                    else:
+                        logger.error(f"DetectionCoordinator: Failed to save segmented image to {output_path}")
+                        
+                except Exception as e:
+                    logger.error(f"DetectionCoordinator: Error using raw detection results: {e}")
+                    import traceback
+                    logger.error(f"DetectionCoordinator: Traceback: {traceback.format_exc()}")
+                    # Fall back to JSON-based method
+            
+            # Fallback to JSON-based method if raw results not available
             if not self.detection_results or 'json_result' not in self.detection_results:
                 logger.warning("DetectionCoordinator: No detection results available")
                 return None
@@ -495,20 +670,14 @@ class DetectionCoordinator:
             # Get the specific person detection
             person_detection = person_detections[person_index]
             
-            # Get original image path
-            original_image_path = self.frame_service.get_last_frame_path()
-            if not original_image_path:
-                logger.error("DetectionCoordinator: No original image path available")
-                return None
-            
-            # Generate segmented person crop for this person
+            # Generate segmented person crop for this person using old method
             crop_path = self.mask_processor.generate_person_mask(
                 detection_data=person_detection,
                 original_image_path=original_image_path
             )
             
             if crop_path:
-                logger.info(f"DetectionCoordinator: Generated segmented person crop for person {person_index} -> {crop_path}")
+                logger.info(f"DetectionCoordinator: Generated segmented person crop for person {person_index} (fallback) -> {crop_path}")
             else:
                 logger.error(f"DetectionCoordinator: Failed to generate segmented person crop for person {person_index}")
             
@@ -522,6 +691,62 @@ class DetectionCoordinator:
         """Get information about the mask processor cache"""
         return self.mask_processor.get_cache_info()
     
+    def generate_full_segmented_image(self, image_path, raw_result):
+        """Generate full segmented image with white background for all persons at once"""
+        try:
+            import cv2
+            import os
+            
+            # Load the original image
+            img = cv2.imread(image_path)
+            if img is None:
+                logger.error(f"DetectionCoordinator: Failed to load image {image_path}")
+                return
+            
+            # Filter to person detections only
+            person_detections = [d for d in raw_result.items if d.class_index == 0]
+            if not person_detections:
+                logger.warning("DetectionCoordinator: No person detections found for full segmentation")
+                return
+            
+            logger.info(f"DetectionCoordinator: Generating full segmented image for {len(person_detections)} persons")
+            
+            # Create white background
+            white_bg = np.full(img.shape, (255, 255, 255), dtype=np.uint8)
+            
+            # Apply all person masks to the white background
+            for i, detection in enumerate(person_detections):
+                if detection.mask:
+                    try:
+                        mask_w, mask_h = detection.mask.width, detection.mask.height
+                        mask = self.mask_processor.create_mask(
+                            detection.mask.buffer(), mask_w, mask_h, img.shape[1], img.shape[0]
+                        )
+                        
+                        if mask is not None:
+                            # Copy person pixels to white background
+                            white_bg[mask] = img[mask]
+                            logger.info(f"DetectionCoordinator: Applied mask for person {i + 1}")
+                        else:
+                            logger.warning(f"DetectionCoordinator: Failed to create mask for person {i + 1}")
+                    except Exception as e:
+                        logger.error(f"DetectionCoordinator: Error applying mask for person {i + 1}: {e}")
+            
+            # Save the full segmented image
+            cache_dir = "cache"
+            os.makedirs(cache_dir, exist_ok=True)
+            full_segmented_path = os.path.join(cache_dir, "full_segmented_image.png")
+            
+            success = cv2.imwrite(full_segmented_path, white_bg)
+            if success:
+                self.segmented_full_image = full_segmented_path
+                logger.info(f"DetectionCoordinator: Generated full segmented image -> {full_segmented_path}")
+            else:
+                logger.error(f"DetectionCoordinator: Failed to save full segmented image")
+                
+        except Exception as e:
+            logger.error(f"DetectionCoordinator: Error generating full segmented image: {e}")
+    
     def clear_mask_cache(self):
         """Clear the mask processor cache"""
         self.mask_processor.clear_cache()
@@ -529,13 +754,92 @@ class DetectionCoordinator:
 
 
 class MaskProcessor:
-    """Process detection masks for individual persons"""
+    """Process detection masks for individual persons using Synap segmentation"""
     
     def __init__(self):
         self.mask_cache = {}  # Cache for generated masks
         self.colors = {
             0: [255, 255, 255],  # White for person class
         }
+    
+    def filter_detections(self, detections):
+        """Filter to get only human detections (class_index == 0)"""
+        # Handle both DetectorResultItems and our wrapper
+        if hasattr(detections, 'items'):
+            items = detections.items
+        else:
+            items = detections
+            
+        if len(items) > 1:
+            logger.info(f"MaskProcessor: Multiple detections found, selecting first human detection")
+        
+        for d in items:
+            if d.class_index == 0:
+                return d
+            logger.info(f"MaskProcessor: Skipping non-human class ({d.class_index})")
+        
+        raise ValueError(f"No valid human detections found")
+    
+    def create_mask(self, mask_data, mask_w, mask_h, inp_w, inp_h, thresh=0):
+        """Create boolean mask from segmentation probability data"""
+        try:
+            import cv2
+            prob_mask = np.array(mask_data, dtype=np.float32).reshape((mask_h, mask_w))
+            prob_mask = cv2.resize(prob_mask, (inp_w, inp_h), interpolation=cv2.INTER_LINEAR)
+            return prob_mask > thresh
+        except Exception as e:
+            logger.error(f"MaskProcessor: Error creating mask: {e}")
+            return None
+    
+    def apply_fg(self, img, mask, color):
+        """Color-in background by copying over img pixels wherever mask is True"""
+        new_img = np.full(img.shape, color, dtype=np.uint8)
+        new_img[mask] = img[mask]
+        return new_img
+    
+    def edit_bg(self, img, mask, color):
+        """Color-in background by coloring pixels to color wherever mask is False"""
+        img[~mask] = color
+        return img
+    
+    def color_bg(self, img, detections, bg_color=(255, 255, 255), mode="edit_bg"):
+        """Main function to color background using segmentation masks"""
+        if mode not in ["apply_fg", "edit_bg"]:
+            raise ValueError(f"Invalid bg coloring mode '{mode}'")
+        if any(c < 0 or c > 255 for c in bg_color):
+            raise ValueError(f"Invalid bg_color {bg_color}; all values must be 0-255")
+        
+        if not isinstance(img, np.ndarray):
+            img = cv2.imread(img)
+        else:
+            if img.ndim == 4:
+                img = img.squeeze(axis=0)
+        
+        inp_h, inp_w, _ = img.shape
+        
+        try:
+            detection = self.filter_detections(detections)
+            logger.info(f"MaskProcessor: Filtered detection class_index: {detection.class_index}")
+            
+            if not detection.mask:
+                logger.warning("MaskProcessor: Detection doesn't contain mask data, returning original image")
+                return img
+            
+            logger.info(f"MaskProcessor: Mask found, width: {detection.mask.width}, height: {detection.mask.height}")
+            mask_w, mask_h = detection.mask.width, detection.mask.height
+            mask = self.create_mask(detection.mask.buffer(), mask_w, mask_h, inp_w, inp_h)
+            
+            if mask is None:
+                logger.warning("MaskProcessor: Failed to create mask, returning original image")
+                return img
+            
+            if mode == "apply_fg":
+                return self.apply_fg(img, mask, bg_color)
+            return self.edit_bg(img, mask, bg_color)
+            
+        except Exception as e:
+            logger.error(f"MaskProcessor: Error in color_bg: {e}")
+            return img
     
     def generate_person_mask(self, detection_data: dict, original_image_path: str, output_path: str = None) -> str:
         """

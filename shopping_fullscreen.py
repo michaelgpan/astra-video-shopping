@@ -845,7 +845,7 @@ class PopupWindow(QMainWindow):
                         logger.error(f"Error in detection callback: {e}")
                 
                 # Run detection asynchronously
-                model_path = "/usr/share/synap/models/object_detection/coco/model/yolov8s-640x384/model.synap"
+                model_path = "/usr/share/synap/models/object_detection/coco/model/yolov8s-seg-640x352/model_seg.synap"
                 detection_service.find_objects_from_image_async(
                     image_path=temp_path,
                     model_path=model_path,

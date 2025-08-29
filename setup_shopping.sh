@@ -18,6 +18,9 @@ if [ ! -d ".venv" ]; then
     python3 -m venv .venv --system-site-packages || { print_message $RED "Failed to create virtual environment. Exiting."; exit 1; }
     #python3 -m venv .venv || { print_message $RED "Failed to create virtual environment. Exiting."; exit 1; }
 
+    # copy the model to usr/share/synap/models/object_detection/coco/model/yolov8s-seg-640x352/model_seg.synap
+    cp model_seg.synap /usr/share/synap/models/object_detection/coco/model/yolov8s-seg-640x352/model_seg.synap || { print_message $RED "Failed to copy model. Exiting."; exit 1; }
+
     # Activate the virtual environment
     source .venv/bin/activate || { print_message $RED "Failed to activate virtual environment. Exiting."; exit 1; }
 
