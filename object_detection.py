@@ -57,7 +57,6 @@ class ObjectDetectionService:
             logger.error(f"ObjectDetectionService: synap dependency not available: {e}")
             return "[]"
         
-        import os
         if not os.path.exists(model_path):
             logger.error(f"ObjectDetectionService: Model not found at '{model_path}'")
             return "[]"
@@ -149,7 +148,6 @@ class ObjectDetectionService:
             logger.error(f"ObjectDetectionService: synap dependency not available: {e}")
             return None
         
-        import os
         if not os.path.exists(model_path):
             logger.error(f"ObjectDetectionService: Model not found at '{model_path}'")
             return None
@@ -245,7 +243,6 @@ class FrameCaptureService:
             
             if captured_pixmap is not None and not captured_pixmap.isNull():
                 # Ensure cache directory exists (relative to current working directory)
-                import os
                 cache_dir = "cache"
                 os.makedirs(cache_dir, exist_ok=True)
                 image_path = os.path.join(cache_dir, "paused_frame.png")
@@ -431,10 +428,40 @@ class ImageCropper:
             
         return success
 
+# Model configuration class
+class ModelConfig:
+    """Configuration for YOLO model selection"""
+    
+    # Available models
+    YOLOV8S_SEG = "yolov8s_seg"  # YOLOv8s segmentation model
+    YOLOV8L_SEG = "yolov8l_seg"  # YOLOv8l segmentation model
+    
+    # Model paths
+    MODEL_PATHS = {
+        YOLOV8S_SEG: "/usr/share/synap/models/object_detection/coco/model/yolov8s-seg-640x352/yolov8s_seg.synap",
+        YOLOV8L_SEG: "/usr/share/synap/models/object_detection/coco/model/yolov8l-seg-640x352/yolov8l_seg.synap"
+    }
+    
+    @classmethod
+    def get_model_path(cls, model_type):
+        """Get the model path for the specified model type"""
+        return cls.MODEL_PATHS.get(model_type, cls.MODEL_PATHS[cls.YOLOV8L_SEG])  # Default to YOLOv8l
+    
+    @classmethod
+    def get_available_models(cls):
+        """Get list of available model types"""
+        return list(cls.MODEL_PATHS.keys())
+
 # Main detection coordinator class
 class DetectionCoordinator:
     
-    def __init__(self):
+    def __init__(self, model_type=ModelConfig.YOLOV8L_SEG):
+        """
+        Initialize DetectionCoordinator with specified model type
+        
+        Args:
+            model_type: Model type to use (YOLOV8S_SEG or YOLOV8L_SEG)
+        """
         self.frame_service = FrameCaptureService()
         self.detection_service = ObjectDetectionService()
         self.coordinate_processor = CoordinateProcessor()
@@ -443,6 +470,12 @@ class DetectionCoordinator:
         self.raw_detection_results = None  # Store raw synap results for mask processing
         self.segmented_full_image = None  # Store the full segmented image with white background
         self.load_thread = None
+        
+        # Set model type and path
+        self.model_type = model_type
+        self.model_path = ModelConfig.get_model_path(model_type)
+        logger.info(f"DetectionCoordinator: Initialized with model type: {model_type}")
+        logger.info(f"DetectionCoordinator: Using model path: {self.model_path}")
     
     def on_video_paused(self, video_widget, callback=None):
         """
@@ -487,12 +520,10 @@ class DetectionCoordinator:
             image_path = self.frame_service.get_last_frame_path()
             if image_path:
                 logger.info(f"DetectionCoordinator: Starting YOLO detection on captured frame {image_path}")
-                # Use hardcoded model path for target machine
-                # model_path = "/usr/share/synap/models/object_detection/coco/model/yolov8s-640x384/model.synap"
-                model_path = "/usr/share/synap/models/object_detection/coco/model/yolov8s-seg-640x352/model_seg.synap"
+                logger.info(f"DetectionCoordinator: Using model: {self.model_type} at {self.model_path}")
                 
                 # First, get raw detection results for mask processing
-                raw_result = self.detection_service.yolo_od_raw(image_path, model_path=model_path)
+                raw_result = self.detection_service.yolo_od_raw(image_path, model_path=self.model_path)
                 if raw_result:
                     self.raw_detection_results = raw_result
                     logger.info(f"DetectionCoordinator: Stored raw detection results with {len(raw_result.items)} items")
@@ -501,7 +532,7 @@ class DetectionCoordinator:
                     self.generate_full_segmented_image(image_path, raw_result)
                 
                 # Then run async detection for JSON results
-                self.detection_service.find_objects_from_image_async(image_path, model_path=model_path, callback=detection_callback)
+                self.detection_service.find_objects_from_image_async(image_path, model_path=self.model_path, callback=detection_callback)
             else:
                 logger.warning("DetectionCoordinator: No saved frame path available, returning empty detection result")
                 detection_callback("[]")
@@ -577,7 +608,6 @@ class DetectionCoordinator:
                         cropped_img = full_segmented_img[y1:y2, x1:x2]
                         
                         # Generate output path
-                        import os
                         cache_dir = "cache"
                         os.makedirs(cache_dir, exist_ok=True)
                         cache_key = f"person_segmented_{person_index}"
@@ -632,7 +662,6 @@ class DetectionCoordinator:
                     )
                     
                     # Generate output path
-                    import os
                     cache_dir = "cache"
                     os.makedirs(cache_dir, exist_ok=True)
                     cache_key = f"person_segmented_{person_index}"
@@ -695,7 +724,6 @@ class DetectionCoordinator:
         """Generate full segmented image with white background for all persons at once"""
         try:
             import cv2
-            import os
             
             # Load the original image
             img = cv2.imread(image_path)
@@ -751,6 +779,41 @@ class DetectionCoordinator:
         """Clear the mask processor cache"""
         self.mask_processor.clear_cache()
         logger.info("DetectionCoordinator: Mask cache cleared")
+    
+    def switch_model(self, model_type):
+        """
+        Switch to a different model type
+        
+        Args:
+            model_type: New model type (YOLOV8S_SEG or YOLOV8L_SEG)
+        """
+        if model_type not in ModelConfig.get_available_models():
+            logger.error(f"DetectionCoordinator: Invalid model type: {model_type}")
+            logger.info(f"DetectionCoordinator: Available models: {ModelConfig.get_available_models()}")
+            return False
+        
+        old_model = self.model_type
+        self.model_type = model_type
+        self.model_path = ModelConfig.get_model_path(model_type)
+        
+        logger.info(f"DetectionCoordinator: Switched from {old_model} to {model_type}")
+        logger.info(f"DetectionCoordinator: New model path: {self.model_path}")
+        
+        # Clear cached results when switching models
+        self.detection_results = []
+        self.raw_detection_results = None
+        self.segmented_full_image = None
+        self.clear_mask_cache()
+        
+        return True
+    
+    def get_current_model_info(self):
+        """Get information about the current model"""
+        return {
+            'model_type': self.model_type,
+            'model_path': self.model_path,
+            'available_models': ModelConfig.get_available_models()
+        }
 
 
 class MaskProcessor:

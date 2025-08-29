@@ -16,6 +16,7 @@ from PyQt5.QtGui import QFont, QPixmap, QPainter, QPen, QColor
 import os
 from object_detection import DetectionCoordinator, ImageCropper
 from image_embedding import ImageEmbedding
+from segmentation_utils import segment_persons_from_image
 
 # import cv2  # Removed to avoid OpenGL dependency
 import numpy as np
@@ -28,16 +29,32 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class PopupWindow(QMainWindow):
-    def __init__(self):
-        """Initialize the PyQt5-based pop-up window"""
+    def __init__(self, model_type=None):
+        """
+        Initialize the PyQt5-based pop-up window
+        
+        Args:
+            model_type: Model type to use (YOLOV8S_SEG or YOLOV8L_SEG). If None, uses default.
+        """
         super().__init__()
         self.video_player = None
         self.is_running = False
         
-        # Initialize object detection coordinator
-        self.detection_coordinator = DetectionCoordinator()
+        # Initialize object detection coordinator with specified model type
+        if model_type is None:
+            # Use default model (YOLOv8l)
+            from object_detection import ModelConfig
+            model_type = ModelConfig.YOLOV8L_SEG
+        
+        self.detection_coordinator = DetectionCoordinator(model_type=model_type)
         self.image_cropper = ImageCropper()  # Initialize ImageCropper for bounding box cropping
         self.last_detection_results = None
+        
+        # Log current model configuration
+        model_info = self.detection_coordinator.get_current_model_info()
+        logger.info(f"🎯 PopupWindow: Initialized with model: {model_info['model_type']}")
+        logger.info(f"🎯 PopupWindow: Model path: {model_info['model_path']}")
+        logger.info(f"🎯 PopupWindow: Available models: {model_info['available_models']}")
         
 
         
@@ -455,42 +472,13 @@ class PopupWindow(QMainWindow):
         try:
             logger.info("apply_person_segmentation: Starting person segmentation...")
             
-            # Convert QPixmap to PIL Image
-            from PyQt5.QtCore import QBuffer, QIODevice
-            from PyQt5.QtGui import QImageWriter
-            from PIL import Image
-            import io
+            # Since we are doing segmentation on the full captured frame,
+            # when 1 person is highlighted, simple cropping would do the job
+            # No need to do segmentation again
+            logger.info("apply_person_segmentation: Using simple cropping since full frame segmentation is already done")
             
-            # Save QPixmap to bytes
-            buffer = QBuffer()
-            buffer.open(QIODevice.WriteOnly)
-            cropped_pixmap.save(buffer, "PNG")
-            
-            # Convert to PIL Image
-            pil_image = Image.open(io.BytesIO(buffer.data())).convert("RGB")
-            buffer.close()
-            
-            # Apply segmentation
-            person_crops = segment_persons_from_image(pil_image, self.segmentation_model, min_confidence=0.5)
-            
-            if person_crops:
-                # Use the first (and likely only) segmented person crop
-                segmented_pil = person_crops[0]
-                logger.info(f"apply_person_segmentation: Successfully segmented person, found {len(person_crops)} person(s)")
-                
-                # Convert back to QPixmap
-                segmented_buffer = io.BytesIO()
-                segmented_pil.save(segmented_buffer, format='PNG')
-                segmented_buffer.seek(0)
-                
-                from PyQt5.QtGui import QPixmap
-                segmented_pixmap = QPixmap()
-                segmented_pixmap.loadFromData(segmented_buffer.getvalue())
-                
-                return segmented_pixmap
-            else:
-                logger.warning("apply_person_segmentation: No person detected in segmentation")
-                return None
+            # Return the cropped pixmap directly without additional segmentation
+            return cropped_pixmap
                 
         except Exception as e:
             logger.error(f"apply_person_segmentation: Error applying segmentation: {e}")
@@ -979,6 +967,32 @@ class PopupWindow(QMainWindow):
                 logger.info("Layout sizes not yet available (widgets not rendered)")
         except Exception as e:
             logger.error(f"Error debugging layout sizes: {e}")
+    
+    def switch_model(self, model_type):
+        """
+        Switch to a different YOLO model
+        
+        Args:
+            model_type: Model type to switch to (yolov8s_seg or yolov8l_seg)
+        """
+        try:
+            success = self.detection_coordinator.switch_model(model_type)
+            if success:
+                logger.info(f"✅ Successfully switched to model: {model_type}")
+                # Update UI to reflect the change
+                model_info = self.detection_coordinator.get_current_model_info()
+                logger.info(f"🎯 Current model: {model_info['model_type']}")
+                logger.info(f"🎯 Model path: {model_info['model_path']}")
+            else:
+                logger.error(f"❌ Failed to switch to model: {model_type}")
+        except Exception as e:
+            logger.error(f"❌ Error switching model: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+    
+    def get_current_model_info(self):
+        """Get information about the current model"""
+        return self.detection_coordinator.get_current_model_info()
 
 
 class VideoPlayer:
@@ -1282,6 +1296,10 @@ def main():
     parser.add_argument('--video', '-v', 
                        default='samples/clip.mp4',
                        help='Path to video file relative to current directory (default: samples/clip.mp4)')
+    parser.add_argument('--model', '-m',
+                       choices=['yolov8s_seg', 'yolov8l_seg'],
+                       default='yolov8s_seg',
+                       help='YOLO model to use for detection (default: yolov8s_seg)')
     
     args = parser.parse_args()
     
@@ -1304,9 +1322,6 @@ def main():
     logger.info(f"Using video file: {video_path}")
     
     try:
-        # macOS GUI context setup
-        logger.info("Setting up macOS GUI context...")
-        
         # Initialize GStreamer first
         gi.require_version("Gst", "1.0")
         from gi.repository import Gst
@@ -1319,7 +1334,8 @@ def main():
         
         # Create and show PyQt5 pop-up window on main thread
         logger.info("Creating PyQt5 pop-up window on main thread...")
-        popup_window = PopupWindow()
+        logger.info(f"Using model: {args.model}")
+        popup_window = PopupWindow(model_type=args.model)
         popup_window.show()
         logger.info("PyQt5 pop-up window created successfully")
         
@@ -1370,6 +1386,7 @@ def main():
 
 if __name__ == "__main__":
     logger.info("🛍️ Starting Shopping Demo with Qt-embedded video...")
-    logger.info("📝 Usage: python shopping.py [--video path/to/video.mp4]")
-    logger.info("📝 Example: python shopping.py --video samples/clip_1.mp4")
+    logger.info("📝 Usage: python shopping.py [--video path/to/video.mp4] [--model yolov8s_seg|yolov8l_seg]")
+    logger.info("📝 Example: python shopping.py --video samples/clip_1.mp4 --model yolov8s_seg")
+    logger.info("📝 Available models: yolov8s_seg (faster), yolov8l_seg (more accurate)")
     sys.exit(main())

@@ -12,14 +12,23 @@ function print_message() {
     echo -e "${1}${2}${NC}"
 }
 
+# copy the yolo model to usr/share/synap/models/object_detection/coco/model/yolov8l-seg-640x352/yolov8l_seg.synap
+if [ ! -d "/usr/share/synap/models/object_detection/coco/model/yolov8l-seg-640x352" ]; then
+    mkdir -p /usr/share/synap/models/object_detection/coco/model/yolov8l-seg-640x352
+    cp yolov8l_seg.synap /usr/share/synap/models/object_detection/coco/model/yolov8l-seg-640x352/yolov8l_seg.synap 
+fi
+
+# copy the yolo model to usr/share/synap/models/object_detection/coco/model/yolov8s-seg-640x352/model_seg.synap
+if [ ! -d "/usr/share/synap/models/object_detection/coco/model/yolov8s-seg-640x352" ]; then
+    mkdir -p /usr/share/synap/models/object_detection/coco/model/yolov8s-seg-640x352
+    cp yolov8s_seg.synap /usr/share/synap/models/object_detection/coco/model/yolov8s-seg-640x352/yolov8s_seg.synap 
+fi
+
 # Check if .venv directory exists
 if [ ! -d ".venv" ]; then
     print_message $GREEN "Virtual environment not found. Creating one..."
     python3 -m venv .venv --system-site-packages || { print_message $RED "Failed to create virtual environment. Exiting."; exit 1; }
     #python3 -m venv .venv || { print_message $RED "Failed to create virtual environment. Exiting."; exit 1; }
-
-    # copy the model to usr/share/synap/models/object_detection/coco/model/yolov8s-seg-640x352/model_seg.synap
-    cp model_seg.synap /usr/share/synap/models/object_detection/coco/model/yolov8s-seg-640x352/model_seg.synap || { print_message $RED "Failed to copy model. Exiting."; exit 1; }
 
     # Activate the virtual environment
     source .venv/bin/activate || { print_message $RED "Failed to activate virtual environment. Exiting."; exit 1; }
