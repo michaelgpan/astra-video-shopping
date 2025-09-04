@@ -10,7 +10,7 @@ import gi
 from pathlib import Path
 import logging
 import platform
-from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame
+from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QSizePolicy
 from PyQt5.QtCore import Qt, QEvent, QTimer
 from PyQt5.QtGui import QFont, QPixmap, QPainter, QPen, QColor
 import os
@@ -106,36 +106,47 @@ class PopupWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
         main_layout.setSpacing(15)
-        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setContentsMargins(15, 15, 15, 15)
         
         # Title section
         title_label = QLabel("🎬 Video Shopping Demo")
         title_label.setFont(QFont("Arial", 16, QFont.Bold))
         title_label.setAlignment(Qt.AlignCenter)
         title_label.setStyleSheet("color: #2c3e50; padding: 10px;")
+        title_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         main_layout.addWidget(title_label)
         
         # Create fixed split-screen layout container
         self.video_container_layout = QHBoxLayout()
+        self.video_container_layout.setSpacing(2)  # Set minimal spacing between video and right panels
         
         # Video frame setup (left side)
         self.video_frame = QFrame()
         self.video_frame.setMinimumHeight(200)
-        self.video_frame.setStyleSheet("background-color: #34495e; border: 2px dashed #7f8c8d; border-radius: 10px;")
-        
+        self.video_frame.setStyleSheet("background-color: #000000; border: 0; border-radius: 12px;")
+        self.video_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
         # Make the video frame focusable and ready for video embedding
         self.video_frame.setFocusPolicy(Qt.StrongFocus)
-        self.video_frame.setAttribute(Qt.WA_NativeWindow, True)  # Important for video embedding
         
         video_layout = QVBoxLayout(self.video_frame)
         self.video_placeholder = QLabel("📺 GStreamer Video Will Be Embedded Here")
         self.video_placeholder.setFont(QFont("Arial", 12))
         self.video_placeholder.setAlignment(Qt.AlignCenter)
-        self.video_placeholder.setStyleSheet("color: #bdc3c7; padding: 20px;")
+        self.video_placeholder.setStyleSheet("color: #bdc3c7; padding: 20px; border-radius: 12px;")
         video_layout.addWidget(self.video_placeholder)
+        
+        # create ONE label and keep it forever
+        self.video_label = QLabel(self.video_frame)
+        self.video_label.setAlignment(Qt.AlignCenter)
+        self.video_label.setScaledContents(False)  
+        self.video_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+        self.video_label.setStyleSheet("background-color: #000000; border-radius: 12px;")
+        video_layout.addWidget(self.video_label)
         
         # Right-side panels (always visible) - 3x4 grid layout
         self.right_box_container = QVBoxLayout()
+        self.right_box_container.setSpacing(5)  # Reduce spacing between rows from default 10px to 5px
         
         # Row 1: Fashion match placeholders (will be updated with FashionCLIP results)
         self.row1_frame = QFrame()
@@ -143,8 +154,8 @@ class PopupWindow(QMainWindow):
         self.row1_frame.setMinimumHeight(120)
         
         row1_layout = QHBoxLayout(self.row1_frame)
-        row1_layout.setContentsMargins(10, 10, 10, 10)  # Same margins as other rows
-        row1_layout.setSpacing(10)  # Same spacing as other rows
+        row1_layout.setContentsMargins(5, 5, 5, 5)  # Reduced margins from 10px to 5px
+        row1_layout.setSpacing(5)  # Reduced spacing from 10px to 5px
         
         # Row 1 image labels (for FashionCLIP matches 1-3)
         self.row1_labels = []
@@ -164,8 +175,8 @@ class PopupWindow(QMainWindow):
         self.row2_frame.setMinimumHeight(120)
         
         row2_layout = QHBoxLayout(self.row2_frame)
-        row2_layout.setContentsMargins(10, 10, 10, 10)  # Same margins as row 1
-        row2_layout.setSpacing(10)  # Same spacing as row 1
+        row2_layout.setContentsMargins(5, 5, 5, 5)  # Reduced margins from 10px to 5px
+        row2_layout.setSpacing(5)  # Reduced spacing from 10px to 5px
         
         # Row 2 image labels (for FashionCLIP matches 4-6)
         self.row2_labels = []
@@ -185,8 +196,8 @@ class PopupWindow(QMainWindow):
         self.row3_frame.setMinimumHeight(120)
         
         row3_layout = QHBoxLayout(self.row3_frame)
-        row3_layout.setContentsMargins(10, 10, 10, 10)  # Same margins as row 1
-        row3_layout.setSpacing(10)  # Same spacing as row 1
+        row3_layout.setContentsMargins(5, 5, 5, 5)  # Reduced margins from 10px to 5px
+        row3_layout.setSpacing(5)  # Reduced spacing from 10px to 5px
         
         # Row 3 image labels (for FashionCLIP matches 7-9)
         self.row3_labels = []
@@ -208,6 +219,7 @@ class PopupWindow(QMainWindow):
         # Create right panel widget (always visible)
         self.right_box_widget = QWidget()
         self.right_box_widget.setLayout(self.right_box_container)
+        self.right_box_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         
         # Set up fixed split-screen layout: video left, panels right
         self.video_container_layout.addWidget(self.video_frame, 2)  # Video takes 2/3 of space
@@ -217,36 +229,88 @@ class PopupWindow(QMainWindow):
         
         # Buttons section
         button_layout = QHBoxLayout()
+        button_layout.setSpacing(10)  # Add spacing between buttons
         
-        self.test_button = QPushButton("🧪 Test Button")
-        self.test_button.setFont(QFont("Arial", 10))
-        self.test_button.setStyleSheet("""
+        # Match Style button (same as space key)
+        self.match_style_button = QPushButton("🎯 Match Style")
+        self.match_style_button.setFont(QFont("Arial", 11))
+        self.match_style_button.setFocusPolicy(Qt.NoFocus)  # Disable focus to prevent keyboard interference
+        self.match_style_button.setStyleSheet("""
             QPushButton {
-                background-color: #3498db;
+                background-color: #27ae60;
                 color: white;
                 border: none;
-                padding: 8px 16px;
-                border-radius: 5px;
+                padding: 12px 20px;
+                border-radius: 6px;
+                min-height: 45px;
             }
             QPushButton:hover {
-                background-color: #2980b9;
+                background-color: #229954;
             }
             QPushButton:pressed {
-                background-color: #21618c;
+                background-color: #1e8449;
             }
         """)
-        self.test_button.clicked.connect(self.on_test_button)
-        button_layout.addWidget(self.test_button)
+        button_layout.addWidget(self.match_style_button)
         
+        # Previous button (same as left arrow)
+        self.previous_button = QPushButton("⬅️ Previous")
+        self.previous_button.setFont(QFont("Arial", 11))
+        self.previous_button.setFocusPolicy(Qt.NoFocus)  # Disable focus to prevent keyboard interference
+        self.previous_button.setStyleSheet("""
+            QPushButton {
+                background-color: #f39c12;
+                color: white;
+                border: none;
+                padding: 12px 20px;
+                border-radius: 6px;
+                min-height: 45px;
+            }
+            QPushButton:hover {
+                background-color: #e67e22;
+            }
+            QPushButton:pressed {
+                background-color: #d35400;
+            }
+        """)
+        button_layout.addWidget(self.previous_button)
+        
+        # Next button (same as right arrow)
+        self.next_button = QPushButton("➡️ Next")
+        self.next_button.setFont(QFont("Arial", 11))
+        self.next_button.setFocusPolicy(Qt.NoFocus)  # Disable focus to prevent keyboard interference
+        self.next_button.setStyleSheet("""
+            QPushButton {
+                background-color: #f39c12;
+                color: white;
+                border: none;
+                padding: 12px 20px;
+                border-radius: 6px;
+                min-height: 45px;
+            }
+            QPushButton:hover {
+                background-color: #e67e22;
+            }
+            QPushButton:pressed {
+                background-color: #d35400;
+            }
+        """)
+        button_layout.addWidget(self.next_button)
+        
+
+        
+        # Close Window button (same as Q key)
         self.close_button = QPushButton("❌ Close Window")
-        self.close_button.setFont(QFont("Arial", 10))
+        self.close_button.setFont(QFont("Arial", 11))
+        self.close_button.setFocusPolicy(Qt.NoFocus)  # Disable focus to prevent keyboard interference
         self.close_button.setStyleSheet("""
             QPushButton {
                 background-color: #e74c3c;
                 color: white;
                 border: none;
-                padding: 8px 16px;
-                border-radius: 5px;
+                padding: 12px 20px;
+                border-radius: 6px;
+                min-height: 45px;
             }
             QPushButton:hover {
                 background-color: #c0392b;
@@ -255,7 +319,6 @@ class PopupWindow(QMainWindow):
                 background-color: #a93226;
             }
         """)
-        self.close_button.clicked.connect(self.close_window)
         button_layout.addWidget(self.close_button)
         
         main_layout.addWidget(QWidget())  # Spacer
@@ -263,6 +326,9 @@ class PopupWindow(QMainWindow):
         
         # Set window properties
         self.setStyleSheet("QMainWindow { background-color: #ffffff; }")
+        
+        # Ensure window can receive keyboard events
+        self.setFocusPolicy(Qt.StrongFocus)
         
         logger.info("PyQt5 pop-up window created successfully")
         
@@ -291,6 +357,9 @@ class PopupWindow(QMainWindow):
             status = "paused ⏸️" if self.video_player.is_paused else "playing ▶️"
             logger.info(f"Video {status}")
             
+            # Update button label based on video state
+            self.update_match_style_button_label()
+            
             # Trigger object detection when video is paused
             if self.video_player.is_paused:
                 logger.info("🔍 Video paused - triggering object detection...")
@@ -301,13 +370,16 @@ class PopupWindow(QMainWindow):
                 # Use model.synap for fast detection via DetectionCoordinator
                 self.detection_coordinator.on_video_paused(self.video_frame, callback=self.on_detection_complete)
             else:
-                # Reset detection when video resumes
-                self.detection_coordinator.reset()
-                logger.info("🔄 Video resumed - detection reset")
-                self.is_in_detection_mode = False
-                self.detection_coordinates = []
-                self.current_focus_index = 0
-                self.draw_single_bounding_box(-1)  # Clear bounding box
+                # Only reset detection if we're not currently in detection mode
+                # This prevents interrupting ongoing detection
+                if not self.is_in_detection_mode:
+                    self.detection_coordinator.reset()
+                    logger.info("🔄 Video resumed - detection reset")
+                    self.detection_coordinates = []
+                    self.current_focus_index = 0
+                    self.draw_single_bounding_box(-1)  # Clear bounding box
+                else:
+                    logger.info("🔄 Video resumed - keeping detection results active")
     
     def on_detection_complete(self, results):
         """Handle detection completion - store results and show first bounding box"""
@@ -691,8 +763,8 @@ class PopupWindow(QMainWindow):
     
     def get_video_label(self):
         """Get the QLabel widget that displays video frames"""
-        if hasattr(self, '_video_label') and self._video_label:
-            return self._video_label
+        if hasattr(self, 'video_label') and self.video_label:
+            return self.video_label
         
         # Look for QLabel children in the video frame
         from PyQt5.QtWidgets import QLabel
@@ -759,11 +831,63 @@ class PopupWindow(QMainWindow):
         logger.info("Quit key pressed in pop-up window")
         self.close_window()
         
-    def on_test_button(self):
-        """Handle test button click"""
-        logger.info("Test button clicked")
-        logger.info("Test button clicked! ✅")
-        
+    def on_match_style_button(self):
+        """Handle match style button click (same as space key)"""
+        logger.info("🎯 Match Style button clicked - calling on_space_key")
+        self.on_space_key()
+    
+    def on_previous_button(self):
+        """Handle previous button click (same as left arrow)"""
+        logger.info("Previous button clicked")
+        self.navigate_bounding_boxes(Qt.Key_Left)
+    
+    def on_next_button(self):
+        """Handle next button click (same as right arrow)"""
+        logger.info("Next button clicked")
+        self.navigate_bounding_boxes(Qt.Key_Right)
+    
+    def update_match_style_button_label(self):
+        """Update the Match Style button label based on video state"""
+        if hasattr(self, 'match_style_button') and self.video_player:
+            if self.video_player.is_paused:
+                self.match_style_button.setText("▶️ Resume Video")
+                self.match_style_button.setStyleSheet("""
+                    QPushButton {
+                        background-color: #3498db;
+                        color: white;
+                        border: none;
+                        padding: 12px 20px;
+                        border-radius: 6px;
+                        min-height: 45px;
+                    }
+                    QPushButton:hover {
+                        background-color: #2980b9;
+                    }
+                    QPushButton:pressed {
+                        background-color: #21618c;
+                    }
+                """)
+                logger.info("🎯 Button label updated to: Resume Video")
+            else:
+                self.match_style_button.setText("🎯 Match Style")
+                self.match_style_button.setStyleSheet("""
+                    QPushButton {
+                        background-color: #27ae60;
+                        color: white;
+                        border: none;
+                        padding: 12px 20px;
+                        border-radius: 6px;
+                        min-height: 45px;
+                    }
+                    QPushButton:hover {
+                        background-color: #229954;
+                    }
+                    QPushButton:pressed {
+                        background-color: #1e8449;
+                    }
+                """)
+                logger.info("🎯 Button label updated to: Match Style")
+    
     def close_window(self):
         """Close the pop-up window"""
         logger.info("Closing PyQt5 pop-up window")
@@ -773,6 +897,8 @@ class PopupWindow(QMainWindow):
     def set_video_player(self, player):
         """Set reference to video player for control integration"""
         self.video_player = player
+        # Initialize button label based on initial video state
+        self.update_match_style_button_label()
         
     def get_video_frame(self):
         """Get the video frame widget for future GStreamer embedding"""
@@ -825,49 +951,20 @@ class PopupWindow(QMainWindow):
                         return
                     
                     # Use fixed video frame size (no more dynamic resizing)
-                    target_size = self.video_frame.size()
-                    
-                    # Update the video frame widget
-                    if hasattr(self.video_frame, 'setPixmap'):
-                        # If it's a QLabel, set pixmap directly
-                        scaled_pixmap = pixmap.scaled(
-                            target_size, 
-                            Qt.KeepAspectRatio, 
-                            Qt.SmoothTransformation
-                        )
-                        self.video_frame.setPixmap(scaled_pixmap)
-                        
-                    else:
-                        # If it's a QFrame, we need to add a QLabel child
-                        if not hasattr(self, '_video_label'):
-                            from PyQt5.QtWidgets import QLabel, QVBoxLayout
-                            logger.info("Creating video label for QFrame")
-                            self._video_label = QLabel()
-                            self._video_label.setStyleSheet("background-color: black;")
-                            
-                            # Clear existing layout if any
-                            if self.video_frame.layout():
-                                QWidget().setLayout(self.video_frame.layout())
-                            
-                            layout = QVBoxLayout(self.video_frame)
-                            layout.setContentsMargins(0, 0, 0, 0)
-                            layout.addWidget(self._video_label)
-                            self.video_frame.setLayout(layout)
-                        
-                        scaled_pixmap = pixmap.scaled(
-                            target_size, 
-                            Qt.KeepAspectRatio, 
-                            Qt.SmoothTransformation
-                        )
-                        self._video_label.setPixmap(scaled_pixmap)
-                        
-                        # Hide the placeholder text since we now have video
-                        if hasattr(self, 'video_placeholder') and self.video_placeholder is not None:
-                            try:
-                                self.video_placeholder.hide()
-                            except RuntimeError:
-                                # Widget already deleted, ignore
-                                pass
+                    target_size = self.video_label.size() 
+
+                    mode = (Qt.SmoothTransformation if (self.video_player and self.video_player.is_paused)
+                            else Qt.FastTransformation)
+                    scaled = pixmap.scaled(self.video_label.size(), Qt.KeepAspectRatio, mode)
+                    self.video_label.setPixmap(scaled)
+
+                    # Hide the placeholder text since we now have video
+                    if hasattr(self, 'video_placeholder') and self.video_placeholder is not None:
+                        try:
+                            self.video_placeholder.hide()
+                        except RuntimeError:
+                            # Widget already deleted, ignore
+                            pass
         except Exception as e:
             logger.error(f"Error processing frame update: {e}")
             import traceback
@@ -925,9 +1022,9 @@ class PopupWindow(QMainWindow):
 
     def resize_video_display(self, half_size=False):
         """Resize the video display immediately"""
-        if hasattr(self, '_video_label') and self._video_label:
+        if hasattr(self, 'video_label') and self.video_label:
             # Get current pixmap
-            current_pixmap = self._video_label.pixmap()
+            current_pixmap = self.video_label.pixmap()
             if current_pixmap and not current_pixmap.isNull():
                 # Calculate target size
                 if half_size:
@@ -943,7 +1040,7 @@ class PopupWindow(QMainWindow):
                     Qt.KeepAspectRatio,
                     Qt.SmoothTransformation
                 )
-                self._video_label.setPixmap(scaled_pixmap)
+                self.video_label.setPixmap(scaled_pixmap)
                 logger.info("Video display resized successfully")
 
     def debug_layout_sizes(self):
@@ -996,7 +1093,7 @@ class PopupWindow(QMainWindow):
 
 
 class VideoPlayer:
-    def __init__(self, video_path: str, embed_widget=None):
+    def __init__(self, video_path: str, embed_widget=None, loop_video=False):
         """Initialize the video player"""
         self.video_path = Path(video_path)
         self.pipeline = None
@@ -1008,6 +1105,8 @@ class VideoPlayer:
         self.embed_widget = embed_widget  # PyQt5 widget to embed video into
         self.popup_window = None  # Reference to popup window
         self._frame_count = 0  # Counter for reducing debug log frequency
+        self.loop_video = loop_video  # Enable/disable video looping
+        self.loop_count = 0  # Track number of loops completed
         
         # Initialize GStreamer
         gi.require_version("Gst", "1.0")
@@ -1042,14 +1141,12 @@ class VideoPlayer:
             logger.info("Creating embedded video pipeline for PyQt5 widget...")
             
             # Use appsink for direct frame capture and rendering
-            # Let GStreamer auto-detect the original framerate (could be 60fps)
+            # Ensure normal playback speed with proper sync and framerate control
             pipeline_str = f"""
                 filesrc location="{self.video_path}" ! 
-                decodebin ! 
-                videoconvert ! 
-                videoscale ! 
-                video/x-raw,format=RGB,width=640,height=480 ! 
-                appsink name=videosink emit-signals=true max-buffers=2 drop=true sync=false
+                decodebin ! videorate ! video/x-raw,framerate=30/1 ! 
+                synavideoconvertscale ! video/x-raw,format=RGB !  
+                appsink name=videosink emit-signals=true sync=true
             """
             
             logger.info(f"Pipeline string: {pipeline_str.strip()}")
@@ -1065,19 +1162,25 @@ class VideoPlayer:
             
             logger.info(f"Got appsink: {self.video_sink}")
             
-            # Configure appsink for widget rendering - auto-detect framerate
-            caps = self.Gst.Caps.from_string("video/x-raw,format=RGB")
+            # Configure appsink for widget rendering with proper sync
+            caps = self.Gst.Caps.from_string("video/x-raw,format=RGB,framerate=30/1")
             self.video_sink.set_property("caps", caps)
             self.video_sink.set_property("emit-signals", True)
-            self.video_sink.set_property("max-buffers", 2)  # Slightly more buffers for 60fps
-            self.video_sink.set_property("drop", True)
-            self.video_sink.set_property("sync", False)  # Disable sync for smoother playback
+            self.video_sink.set_property("max-buffers", 3)  # More buffers for smooth playback
+            self.video_sink.set_property("drop", False)  # Don't drop frames to maintain sync
+            self.video_sink.set_property("sync", True)  # Enable sync for normal playback speed
             
             logger.info("Appsink configured with properties")
             
             # Connect the new-sample signal to our callback
             self.video_sink.connect("new-sample", self._on_new_sample)
             logger.info("Connected new-sample signal to callback")
+            
+            # Set up bus message handling for EOS (End of Stream) events
+            bus = self.pipeline.get_bus()
+            bus.add_signal_watch()
+            bus.connect("message", self._on_bus_message)
+            logger.info("Connected bus message handler for EOS detection")
             
             return True
             
@@ -1157,6 +1260,63 @@ class VideoPlayer:
             self.is_playing = False
             self.is_paused = False
             logger.info("Video stopped")
+    
+    def _on_bus_message(self, bus, message):
+        """Handle GStreamer bus messages for errors and EOS"""
+        try:
+            msg_type = message.type
+            
+            if msg_type == self.Gst.MessageType.ERROR:
+                err, debug = message.parse_error()
+                logger.error(f"GStreamer error: {err}, debug: {debug}")
+            
+            elif msg_type == self.Gst.MessageType.EOS:
+                logger.info("🎬 End of stream reached")
+                if self.loop_video:
+                    self.loop_count += 1
+                    logger.info(f"🔄 Video loop #{self.loop_count} completed - restarting...")
+                    self._restart_video()
+                else:
+                    logger.info("📺 Video finished - stopping playback")
+                    self.stop()
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error handling bus message: {e}")
+            return True
+    
+    def _restart_video(self):
+        """Restart video playback from the beginning"""
+        try:
+            logger.info("🔄 Restarting video playback...")
+            
+            # Stop current pipeline
+            if self.pipeline:
+                self.pipeline.set_state(self.Gst.State.NULL)
+            
+            # Create new pipeline
+            if not self.create_embedded_pipeline():
+                logger.error("Failed to recreate pipeline for loop")
+                return False
+            
+            # Start playback
+            ret = self.pipeline.set_state(self.Gst.State.PLAYING)
+            if ret == self.Gst.StateChangeReturn.FAILURE:
+                logger.error("Failed to restart video playback")
+                return False
+            
+            self.is_playing = True
+            self.is_paused = False
+            logger.info(f"✅ Video restarted successfully (loop #{self.loop_count})")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error restarting video: {e}")
+            import traceback
+            logger.error(f"Restart traceback: {traceback.format_exc()}")
+            return False
     
     def get_current_frame(self):
         """Get current video frame as QPixmap for cropping"""
@@ -1300,6 +1460,9 @@ def main():
                        choices=['yolov8s_seg', 'yolov8l_seg'],
                        default='yolov8s_seg',
                        help='YOLO model to use for detection (default: yolov8s_seg)')
+    parser.add_argument('--loop', '-l',
+                       action='store_true',
+                       help='Enable video looping (video will restart automatically when finished)')
     
     args = parser.parse_args()
     
@@ -1340,13 +1503,13 @@ def main():
         logger.info("PyQt5 pop-up window created successfully")
         
         # Connect button signals
-        popup_window.test_button.clicked.connect(popup_window.on_test_button)
+        popup_window.match_style_button.clicked.connect(popup_window.on_match_style_button)
+        popup_window.previous_button.clicked.connect(popup_window.on_previous_button)
+        popup_window.next_button.clicked.connect(popup_window.on_next_button)
         popup_window.close_button.clicked.connect(popup_window.close_window)
         
         # Set window properties
         popup_window.setWindowTitle("🎬 Video Shopping Demo")
-        popup_window.setGeometry(100, 100, 800, 600)
-        popup_window.show()
         
         # Debug layout sizes after window is shown
         QTimer.singleShot(100, popup_window.debug_layout_sizes)  # Delay to ensure widgets are rendered
@@ -1355,7 +1518,8 @@ def main():
         
         # Create video player
         logger.info(f"Creating video player for: {video_path}")
-        player = VideoPlayer(video_path)
+        logger.info(f"Loop mode: {'enabled' if args.loop else 'disabled'}")
+        player = VideoPlayer(video_path, loop_video=args.loop)
         
         # Set up video embedding
         player.set_embed_widget(popup_window.get_video_frame())
@@ -1366,7 +1530,9 @@ def main():
             logger.error("Failed to start embedded video playback")
             return 1
         
+        loop_status = "enabled" if args.loop else "disabled"
         logger.info("Application ready. Controls: SPACE: pause/resume, q: quit, +: plus key (in popup)")
+        logger.info(f"Video looping: {loop_status}")
         logger.info("Starting PyQt5 event loop on main thread...")
         
         # Start Qt event loop (this blocks until application exits)
@@ -1386,7 +1552,8 @@ def main():
 
 if __name__ == "__main__":
     logger.info("🛍️ Starting Shopping Demo with Qt-embedded video...")
-    logger.info("📝 Usage: python shopping.py [--video path/to/video.mp4] [--model yolov8s_seg|yolov8l_seg]")
-    logger.info("📝 Example: python shopping.py --video samples/clip_1.mp4 --model yolov8s_seg")
+    logger.info("📝 Usage: python shopping.py [--video path/to/video.mp4] [--model yolov8s_seg|yolov8l_seg] [--loop]")
+    logger.info("📝 Example: python shopping.py --video samples/clip_1.mp4 --model yolov8s_seg --loop")
     logger.info("📝 Available models: yolov8s_seg (faster), yolov8l_seg (more accurate)")
+    logger.info("📝 Use --loop to enable video looping (video restarts automatically when finished)")
     sys.exit(main())
