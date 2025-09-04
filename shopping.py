@@ -1144,9 +1144,11 @@ class VideoPlayer:
             # Ensure normal playback speed with proper sync and framerate control
             pipeline_str = f"""
                 filesrc location="{self.video_path}" ! 
-                decodebin ! videorate ! video/x-raw,framerate=30/1 ! 
+                  decodebin name=dec ! 
+                queue ! videorate ! video/x-raw,framerate=30/1 ! 
                 synavideoconvertscale ! video/x-raw,format=RGB !  
                 appsink name=videosink emit-signals=true sync=true
+                dec. ! queue ! audioconvert ! audio/x-raw,rate=48000,channels=2 ! alsasink device=hw:0,7 sync=false
             """
             
             logger.info(f"Pipeline string: {pipeline_str.strip()}")
